@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Hermes Wear</string>
+    <string name="complication_label">Hermes</string>
+    <string name="voice_input_prompt">Speak to Hermes...</string>
+    <string name="approval_title">Approval Required</string>
+    <string name="approval_approve">Approve</string>
+    <string name="approval_deny">Deny</string>
+    <string name="approval_dismiss">Dismiss</string>
+    <string name="connection_connected">Connected</string>
+    <string name="connection_disconnected">Disconnected</string>
+    <string name="connection_reconnecting">Reconnecting…</string>
+    <string name="empty_conversation">Say something to Hermes</string>
+    <string name="settings_title">Settings</string>
+    <string name="settings_server_url">Server URL</string>
+    <string name="settings_connect">Connect</string>
+    <string name="settings_disconnect">Disconnect</string>
+    <string name="settings_clear_messages">Clear Messages</string>
+</resources>

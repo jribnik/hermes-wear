@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<wearableApp xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:name="Hermes Wear"
+    android:description="@string/app_name">
+    <meta-data
+        android:name="com.google.android.wearable.standalone"
+        android:value="true" />
+</wearableApp>
