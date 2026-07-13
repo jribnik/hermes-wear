@@ -36,9 +36,11 @@ fun SettingsScreen(
             state = listState,
             modifier = Modifier
                 .fillMaxSize()
-                .background(HermesColors.Background),
+                .background(HermesColors.Background)
+                .padding(start = 12.dp, end = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+            horizontalAlignment = Alignment.CenterHorizontally,
+            contentPadding = PaddingValues(top = 12.dp, bottom = 12.dp)
         ) {
             // Header
             item {
