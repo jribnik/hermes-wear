@@ -9,10 +9,6 @@ import com.hermes.wear.data.repository.PreferenceHelper
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
-/**
- * Main ViewModel. Uses the shared HermesRepository (from HermesWearApp)
- * so both Service and ViewModel observe the same data.
- */
 class HermesViewModel(application: Application) : AndroidViewModel(application) {
 
     private val app = application as HermesWearApp
@@ -35,20 +31,13 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             repository.incomingMessages.collect { payload ->
                 when (payload.type) {
-                    PayloadType.MESSAGE -> {
-                        payload.message?.let { msg -> repository.addMessage(msg) }
-                    }
-                    PayloadType.APPROVAL -> {
-                        payload.approval?.let { approval -> repository.addApproval(approval) }
-                    }
-                    PayloadType.HEARTBEAT -> { /* no-op */ }
-                    PayloadType.STATUS -> {
-                        payload.status?.let { status -> _connectionStatus.value = status }
-                    }
+                    PayloadType.MESSAGE -> payload.message?.let { repository.addMessage(it) }
+                    PayloadType.APPROVAL -> payload.approval?.let { repository.addApproval(it) }
+                    PayloadType.STATUS -> payload.status?.let { _connectionStatus.value = it }
+                    else -> {}
                 }
             }
         }
-
         viewModelScope.launch {
             repository.pendingApprovals.collect { approvals ->
                 _currentApproval.value = approvals.lastOrNull()
@@ -64,16 +53,34 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _isLoading.value = true
             val result = repository.sendMessage(text)
-            result.onFailure { e -> _error.emit("Failed to send: ${e.message}") }
+            result.onSuccess { _connectionStatus.value = ConnectionStatus.CONNECTED }
+            result.onFailure { e ->
+                _error.emit("Failed: ${e.message}")
+                _connectionStatus.value = ConnectionStatus.DISCONNECTED
+            }
             _isLoading.value = false
         }
+    }
+
+    fun connectToHermes() {
+        viewModelScope.launch {
+            _connectionStatus.value = ConnectionStatus.RECONNECTING
+            // API Server is HTTP-only (no WebSocket). Send a ping to verify reachability.
+            val result = repository.sendMessage("ping")
+            result.onSuccess { _connectionStatus.value = ConnectionStatus.CONNECTED }
+            result.onFailure { _connectionStatus.value = ConnectionStatus.DISCONNECTED }
+        }
+    }
+
+    fun disconnect() {
+        _connectionStatus.value = ConnectionStatus.DISCONNECTED
     }
 
     fun approveCurrentRequest() {
         val approval = _currentApproval.value ?: return
         viewModelScope.launch {
-            val result = repository.approveRequest(approval.id)
-            result.onSuccess { _currentApproval.value = null }
+            repository.approveRequest(approval.id)
+                .onSuccess { _currentApproval.value = null }
                 .onFailure { e -> _error.emit("Failed to approve: ${e.message}") }
         }
     }
@@ -81,8 +88,8 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     fun denyCurrentRequest() {
         val approval = _currentApproval.value ?: return
         viewModelScope.launch {
-            val result = repository.denyRequest(approval.id)
-            result.onSuccess { _currentApproval.value = null }
+            repository.denyRequest(approval.id)
+                .onSuccess { _currentApproval.value = null }
                 .onFailure { e -> _error.emit("Failed to deny: ${e.message}") }
         }
     }
@@ -93,12 +100,4 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun getServerUrl(): String = prefs.serverUrl
-
-    fun connectToHermes() {
-        com.hermes.wear.service.HermesConnectionService.start(app)
-    }
-
-    fun disconnect() {
-        com.hermes.wear.service.HermesConnectionService.stop(app)
-    }
 }
