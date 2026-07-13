@@ -16,9 +16,11 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Manages the HTTP and WebSocket connection to the Hermes Gateway API.
  */
 class HermesApiClient(
-    baseUrl: String
+    baseUrl: String,
+    apiKey: String = "hermes-wear-2026"
 ) {
     @Volatile var baseUrl: String = baseUrl
+    @Volatile var apiKey: String = apiKey
     private val gson = Gson()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
@@ -50,6 +52,7 @@ class HermesApiClient(
         val wsUrl = baseUrl.replace("http", "ws") + "/ws/watch"
         val request = Request.Builder()
             .url(wsUrl)
+            .addHeader("Authorization", "Bearer $apiKey")
             .addHeader("X-Client-Type", "wear_os")
             .addHeader("X-Client-ID", "pixel_watch_4")
             .build()
@@ -89,43 +92,25 @@ class HermesApiClient(
     fun observeMessages(): Channel<HermesWebhookPayload> = incomingMessages
 
     /**
-     * Send a text message to Hermes via HTTP POST.
+     * Send a text message to Hermes via the OpenAI Responses API and relay
+     * any assistant reply / function-call approvals through the shared
+     * incoming-messages channel (the same channel WebSocket/long-poll use).
      */
     suspend fun sendMessage(text: String): Result<HermesMessage> = withContext(Dispatchers.IO) {
-        try {
-            val requestBody = SendMessageRequest(text = text)
-            val json = gson.toJson(requestBody)
-            val body = json.toRequestBody(jsonMediaType)
-
-            val request = Request.Builder()
-                .url("$baseUrl/api/message")
-                .post(body)
-                .addHeader("X-Client-Type", "wear_os")
-                .addHeader("X-Client-ID", "pixel_watch_4")
-                .build()
-
-            val response = client.newCall(request).execute()
-            if (response.isSuccessful) {
-                val responseBody = response.body?.string() ?: "{}"
-                val message = gson.fromJson(responseBody, HermesMessage::class.java)
-                Result.success(message)
-            } else {
-                Result.failure(IOException("HTTP ${response.code}: ${response.message}"))
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+        postToResponsesApi(text)
     }
 
     /**
-     * Approve an approval request.
+     * Approve an approval request. The Responses API has no inline
+     * approve/deny endpoint, so the decision is sent as a follow-up
+     * /v1/responses call whose input carries the decision as text.
      */
     suspend fun approveRequest(approvalId: String): Result<Unit> = withContext(Dispatchers.IO) {
         sendApprovalDecision(approvalId, ApprovalDecision.APPROVE)
     }
 
     /**
-     * Deny an approval request.
+     * Deny an approval request (see [approveRequest]).
      */
     suspend fun denyRequest(approvalId: String): Result<Unit> = withContext(Dispatchers.IO) {
         sendApprovalDecision(approvalId, ApprovalDecision.DENY)
@@ -135,27 +120,68 @@ class HermesApiClient(
         approvalId: String,
         decision: ApprovalDecision
     ): Result<Unit> = withContext(Dispatchers.IO) {
-        try {
-            val approvalResponse = ApprovalResponse(
-                approvalId = approvalId,
-                decision = decision
-            )
-            val json = gson.toJson(approvalResponse)
+        val decisionText = if (decision == ApprovalDecision.APPROVE) "approve" else "deny"
+        postToResponsesApi("$decisionText $approvalId").map { }
+    }
+
+    /**
+     * POST {"model": "hermes-agent", "input": text} to /v1/responses and
+     * relay the parsed output — assistant messages and function-call
+     * approvals both surface via [incomingMessages], since neither has a
+     * dedicated endpoint under the Responses API.
+     */
+    private fun postToResponsesApi(text: String): Result<HermesMessage> {
+        return try {
+            val requestBody = ResponsesApiRequest(input = text)
+            val json = gson.toJson(requestBody)
             val body = json.toRequestBody(jsonMediaType)
 
             val request = Request.Builder()
-                .url("$baseUrl/api/approval/respond")
+                .url("$baseUrl/v1/responses")
                 .post(body)
+                .addHeader("Authorization", "Bearer $apiKey")
                 .addHeader("X-Client-Type", "wear_os")
                 .addHeader("X-Client-ID", "pixel_watch_4")
                 .build()
 
             val response = client.newCall(request).execute()
-            if (response.isSuccessful) {
-                Result.success(Unit)
-            } else {
-                Result.failure(IOException("HTTP ${response.code}: ${response.message}"))
+            if (!response.isSuccessful) {
+                return Result.failure(IOException("HTTP ${response.code}: ${response.message}"))
             }
+
+            val responseBody = response.body?.string() ?: "{}"
+            val apiResponse = gson.fromJson(responseBody, ResponsesApiResponse::class.java)
+
+            var replyMessage: HermesMessage? = null
+            apiResponse.output?.forEach { item ->
+                when (item.type) {
+                    "message" -> {
+                        val replyText = item.content
+                            ?.filter { it.type == "output_text" }
+                            ?.mapNotNull { it.text }
+                            ?.joinToString("\n\n")
+                        if (!replyText.isNullOrBlank()) {
+                            val message = HermesMessage(text = replyText, sender = Sender.HERMES)
+                            replyMessage = message
+                            incomingMessages.trySend(
+                                HermesWebhookPayload(type = PayloadType.MESSAGE, message = message)
+                            )
+                        }
+                    }
+                    "function_call" -> {
+                        val approval = ApprovalRequest(
+                            id = item.callId ?: item.id ?: java.util.UUID.randomUUID().toString(),
+                            command = item.arguments ?: "",
+                            description = item.name ?: "Approval requested"
+                        )
+                        incomingMessages.trySend(
+                            HermesWebhookPayload(type = PayloadType.APPROVAL, approval = approval)
+                        )
+                    }
+                }
+            }
+
+            Result.success(replyMessage ?: HermesMessage(text = "", sender = Sender.HERMES))
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -173,6 +199,7 @@ class HermesApiClient(
             try {
                 val request = Request.Builder()
                     .url("$baseUrl/api/poll/watch?client_id=pixel_watch_4")
+                    .addHeader("Authorization", "Bearer $apiKey")
                     .addHeader("X-Client-Type", "wear_os")
                     .addHeader("X-Client-ID", "pixel_watch_4")
                     .get()

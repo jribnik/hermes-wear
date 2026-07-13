@@ -131,37 +131,57 @@ enum class ConnectionStatus {
 }
 
 /**
- * Request body for sending a message to Hermes.
+ * Request body for the OpenAI Responses API (/v1/responses).
  */
-data class SendMessageRequest(
-    @SerializedName("text")
-    val text: String,
+data class ResponsesApiRequest(
+    @SerializedName("model")
+    val model: String = "hermes-agent",
 
-    @SerializedName("platform")
-    val platform: String = "wear_os",
-
-    @SerializedName("sender_id")
-    val senderId: String = "pixel_watch_4",
-
-    @SerializedName("timestamp")
-    val timestamp: Long = System.currentTimeMillis()
+    @SerializedName("input")
+    val input: String
 )
 
 /**
- * Response body for approving or denying an approval request.
+ * Response body from the OpenAI Responses API (/v1/responses).
  */
-data class ApprovalResponse(
-    @SerializedName("approval_id")
-    val approvalId: String,
+data class ResponsesApiResponse(
+    @SerializedName("id")
+    val id: String? = null,
 
-    @SerializedName("decision")
-    val decision: ApprovalDecision,
+    @SerializedName("output")
+    val output: List<ResponsesOutputItem>? = null
+)
 
-    @SerializedName("platform")
-    val platform: String = "wear_os",
+/**
+ * A single item in a Responses API `output` array — either an assistant
+ * message or a function call requiring approval.
+ */
+data class ResponsesOutputItem(
+    @SerializedName("type")
+    val type: String,
 
-    @SerializedName("timestamp")
-    val timestamp: Long = System.currentTimeMillis()
+    @SerializedName("id")
+    val id: String? = null,
+
+    @SerializedName("content")
+    val content: List<ResponsesContentPart>? = null,
+
+    @SerializedName("name")
+    val name: String? = null,
+
+    @SerializedName("arguments")
+    val arguments: String? = null,
+
+    @SerializedName("call_id")
+    val callId: String? = null
+)
+
+data class ResponsesContentPart(
+    @SerializedName("type")
+    val type: String,
+
+    @SerializedName("text")
+    val text: String? = null
 )
 
 enum class ApprovalDecision {
