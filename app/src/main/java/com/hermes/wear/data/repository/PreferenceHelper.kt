@@ -19,7 +19,7 @@ class PreferenceHelper(context: Context) {
         const val KEY_ENABLE_NOTIFICATIONS = "enable_notifications"
         const val KEY_VIBRATE_ON_MESSAGE = "vibrate_on_message"
         const val KEY_VIBRATE_ON_APPROVAL = "vibrate_on_approval"
-        const val DEFAULT_SERVER_URL = "http://10.0.0.100:8080"
+        const val DEFAULT_SERVER_URL = "http://192.168.50.37:8642"
         const val DEFAULT_SENDER_ID = "pixel_watch_4"
     }
 
