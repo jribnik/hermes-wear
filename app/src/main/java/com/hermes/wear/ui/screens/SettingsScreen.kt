@@ -154,7 +154,7 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(12.dp))
 
             // Back button
-            TextButton(onClick = onBack) {
+            Button(onClick = onBack) {
                 Text(
                     text = "← Back",
                     style = MaterialTheme.typography.button,

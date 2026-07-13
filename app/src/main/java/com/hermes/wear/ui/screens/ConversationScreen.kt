@@ -42,12 +42,7 @@ fun ConversationScreen(
     }
 
     Scaffold(
-        vignette = { Vignette(vignettePosition = VignettePosition.TopAndBottom) },
-        positionIndicator = {
-            if (messages.size > 3) {
-                PositionIndicator(scalingLazyListState = listState)
-            }
-        }
+        vignette = { Vignette(vignettePosition = VignettePosition.TopAndBottom) }
     ) {
         Box(
             modifier = Modifier

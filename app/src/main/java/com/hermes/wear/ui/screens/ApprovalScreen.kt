@@ -110,7 +110,7 @@ fun ApprovalScreen(
                         textAlign = TextAlign.Center,
                         maxLines = 3,
                         overflow = TextOverflow.Ellipsis,
-                        fontWeight = FontWeight.Mono
+                        fontWeight = FontWeight.Medium
                     )
 
                     // Description if available
@@ -186,7 +186,7 @@ fun ApprovalScreen(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     // Dismiss / ignore button
-                    TextButton(onClick = onDismiss) {
+                    Button(onClick = onDismiss) {
                         Text(
                             text = "Ignore",
                             style = MaterialTheme.typography.caption3,

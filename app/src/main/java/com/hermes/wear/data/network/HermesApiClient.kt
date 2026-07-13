@@ -10,6 +10,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.logging.HttpLoggingInterceptor
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Manages the HTTP and WebSocket connection to the Hermes Gateway API.
@@ -34,6 +35,7 @@ class HermesApiClient(
 
     private var webSocket: WebSocket? = null
     private val incomingMessages = Channel<HermesWebhookPayload>(Channel.BUFFERED)
+    private val active = AtomicBoolean(true)
 
     /**
      * Connect to Hermes via WebSocket for real-time messages.
@@ -166,7 +168,7 @@ class HermesApiClient(
         onMessage: (HermesWebhookPayload) -> Unit,
         onError: (Exception) -> Unit
     ) {
-        while (isActive) {
+        while (active.get()) {
             try {
                 val request = Request.Builder()
                     .url("$baseUrl/api/poll/watch?client_id=pixel_watch_4")
@@ -192,6 +194,7 @@ class HermesApiClient(
      * Disconnect WebSocket and clean up resources.
      */
     fun disconnect() {
+        active.set(false)
         webSocket?.close(1000, "User disconnected")
         webSocket = null
         incomingMessages.close()

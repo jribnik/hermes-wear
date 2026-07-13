@@ -106,8 +106,10 @@ class HermesConnectionService : LifecycleService() {
                 onFailure = { error ->
                     updateNotification("Connection error: ${error.message}")
                     // Retry after delay
-                    delay(10000)
-                    startConnection()
+                    lifecycleScope.launch {
+                        delay(10000)
+                        startConnection()
+                    }
                 }
             )
 
