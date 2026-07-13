@@ -40,7 +40,7 @@ fun ConversationScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .background(HermesColors.Background)
-                .padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 16.dp)
+                .padding(start = 28.dp, end = 28.dp, top = 28.dp, bottom = 20.dp)
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 ConnectionStatusIndicator(
