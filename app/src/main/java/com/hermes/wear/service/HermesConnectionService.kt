@@ -61,9 +61,14 @@ class HermesConnectionService : LifecycleService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            ACTION_START -> startConnection()
-            ACTION_STOP -> stopConnection()
+        try {
+            when (intent?.action) {
+                ACTION_START -> startConnection()
+                ACTION_STOP -> stopConnection()
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("HermesConnection", "onStartCommand failed", e)
+            stopSelf()
         }
         return START_STICKY
     }
