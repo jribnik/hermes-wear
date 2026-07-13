@@ -19,11 +19,6 @@ import com.hermes.wear.ui.components.ConnectionStatusIndicator
 import com.hermes.wear.ui.components.MessageBubble
 import com.hermes.wear.ui.theme.HermesColors
 
-/**
- * Main conversation screen with round-screen-safe layout.
- * Uses ScalingLazyColumn with contentPadding for bezel-safe scrolling,
- * plus edge padding on fixed header/footer elements.
- */
 @Composable
 fun ConversationScreen(
     viewModel: HermesViewModel,
@@ -35,9 +30,7 @@ fun ConversationScreen(
     val listState = rememberScalingLazyListState()
 
     LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size - 1)
-        }
+        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
     }
 
     Scaffold(
@@ -47,26 +40,18 @@ fun ConversationScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .background(HermesColors.Background)
+                .padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 16.dp)
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp)
-            ) {
-                // Connection status bar
+            Column(modifier = Modifier.fillMaxSize()) {
                 ConnectionStatusIndicator(
                     status = connectionStatus,
                     onTap = { viewModel.connectToHermes() }
                 )
 
                 if (messages.isEmpty()) {
-                    Box(
-                        modifier = Modifier.weight(1f).fillMaxWidth(),
-                        contentAlignment = Alignment.Center
-                    ) {
+                    Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                         Text(
-                            text = if (connectionStatus == ConnectionStatus.CONNECTED)
-                                "Say something to Hermes" else "Connecting to Hermes...",
+                            text = if (connectionStatus == ConnectionStatus.CONNECTED) "Say something to Hermes" else "Connecting to Hermes...",
                             style = MaterialTheme.typography.body2,
                             color = HermesColors.SystemGray,
                             textAlign = TextAlign.Center
@@ -77,7 +62,7 @@ fun ConversationScreen(
                         state = listState,
                         modifier = Modifier.weight(1f).fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(4.dp),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
                         autoCentering = null
                     ) {
                         items(messages, key = { it.id }) { message ->
@@ -86,45 +71,30 @@ fun ConversationScreen(
                     }
                 }
 
-                // Bottom action bar
-                ActionBar(
-                    onVoiceInput = onStartVoiceInput,
-                    onSettings = onOpenSettings
-                )
+                ActionBar(onVoiceInput = onStartVoiceInput, onSettings = onOpenSettings)
             }
         }
     }
 }
 
 @Composable
-private fun ActionBar(
-    onVoiceInput: () -> Unit,
-    onSettings: () -> Unit
-) {
+private fun ActionBar(onVoiceInput: () -> Unit, onSettings: () -> Unit) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Chip(
             onClick = onVoiceInput,
             label = { Text("🎤 Speak") },
-            colors = ChipDefaults.chipColors(
-                backgroundColor = HermesColors.Primary,
-                contentColor = HermesColors.OnPrimary
-            ),
+            colors = ChipDefaults.chipColors(backgroundColor = HermesColors.Primary, contentColor = HermesColors.OnPrimary),
             modifier = Modifier.weight(1f)
         )
         Spacer(modifier = Modifier.width(6.dp))
         Chip(
             onClick = onSettings,
             label = { Text("⚙️") },
-            colors = ChipDefaults.chipColors(
-                backgroundColor = HermesColors.SurfaceVariant,
-                contentColor = HermesColors.OnSurface
-            )
+            colors = ChipDefaults.chipColors(backgroundColor = HermesColors.SurfaceVariant, contentColor = HermesColors.OnSurface)
         )
     }
 }
