@@ -3,8 +3,8 @@ package com.hermes.wear.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.hermes.wear.HermesWearApp
 import com.hermes.wear.data.model.*
-import com.hermes.wear.data.network.HermesApiClient
 import com.hermes.wear.data.repository.HermesRepository
 import com.hermes.wear.data.repository.PreferenceHelper
 import kotlinx.coroutines.flow.*
@@ -12,12 +12,13 @@ import kotlinx.coroutines.launch
 
 /**
  * Main ViewModel for the Hermes Wear app.
- * Manages conversation state, connection, and approval lifecycle.
+ * Uses the Application-scoped shared HermesApiClient (created by HermesWearApp)
+ * so there is only one WebSocket connection to the gateway.
  */
 class HermesViewModel(application: Application) : AndroidViewModel(application) {
 
+    private val app = application as HermesWearApp
     private val prefs = PreferenceHelper(application)
-    private val apiClient: HermesApiClient
     val repository: HermesRepository
 
     // UI State
@@ -35,8 +36,7 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     val currentApproval: StateFlow<ApprovalRequest?> = _currentApproval.asStateFlow()
 
     init {
-        apiClient = HermesApiClient(prefs.serverUrl)
-        repository = HermesRepository(apiClient)
+        repository = HermesRepository(app.apiClient)
 
         // Observe connection state
         viewModelScope.launch {
@@ -61,9 +61,6 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     val messages: StateFlow<List<HermesMessage>> = repository.messages
     val pendingApprovals: StateFlow<List<ApprovalRequest>> = repository.pendingApprovals
 
-    /**
-     * Connect to the Hermes Gateway API.
-     */
     fun connectToHermes() {
         viewModelScope.launch {
             _isLoading.value = true
@@ -77,10 +74,6 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /**
-     * Send a text message to Hermes.
-     * Called after voice input or text input.
-     */
     fun sendMessage(text: String) {
         if (text.isBlank()) return
         viewModelScope.launch {
@@ -93,25 +86,18 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /**
-     * Approve the current approval request.
-     */
     fun approveCurrentRequest() {
         val approval = _currentApproval.value ?: return
         viewModelScope.launch {
             val result = repository.approveRequest(approval.id)
             result.onSuccess {
                 _currentApproval.value = null
-                // Add a system message confirming the action
             }.onFailure { e ->
                 _error.emit("Failed to approve: ${e.message}")
             }
         }
     }
 
-    /**
-     * Deny the current approval request.
-     */
     fun denyCurrentRequest() {
         val approval = _currentApproval.value ?: return
         viewModelScope.launch {
@@ -124,23 +110,14 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /**
-     * Update the server URL and reconnect.
-     */
     fun updateServerUrl(url: String) {
         prefs.serverUrl = url
         disconnect()
         connectToHermes()
     }
 
-    /**
-     * Get the current server URL.
-     */
     fun getServerUrl(): String = prefs.serverUrl
 
-    /**
-     * Disconnect from Hermes.
-     */
     fun disconnect() {
         repository.stopConnection()
         _connectionStatus.value = ConnectionStatus.DISCONNECTED

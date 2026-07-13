@@ -186,13 +186,7 @@ fun ApprovalScreen(
                     Spacer(modifier = Modifier.height(8.dp))
 
                     // Dismiss / ignore button
-                    Button(onClick = onDismiss) {
-                        Text(
-                            text = "Ignore",
-                            style = MaterialTheme.typography.caption3,
-                            color = HermesColors.SystemGray
-                        )
-                    }
+                    Chip(onClick = onDismiss, label = { Text("Ignore", style = MaterialTheme.typography.caption3, color = HermesColors.SystemGray) })
                 }
             }
         }

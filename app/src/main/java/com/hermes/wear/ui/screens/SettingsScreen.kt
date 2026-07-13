@@ -16,6 +16,8 @@ import com.hermes.wear.ui.theme.HermesColors
 
 /**
  * Settings screen for configuring the Hermes connection and preferences.
+ * Server URL is editable — tap the URL chip to enter edit mode, then
+ * use voice input on the main screen to capture the new URL.
  */
 @Composable
 fun SettingsScreen(
@@ -53,9 +55,9 @@ fun SettingsScreen(
                 label = {
                     Text(
                         text = when (connectionStatus) {
-                            ConnectionStatus.CONNECTED -> "● Connected"
-                            ConnectionStatus.DISCONNECTED -> "○ Disconnected"
-                            ConnectionStatus.RECONNECTING -> "◌ Reconnecting..."
+                            ConnectionStatus.CONNECTED -> "\u25CF Connected"
+                            ConnectionStatus.DISCONNECTED -> "\u25CB Disconnected"
+                            ConnectionStatus.RECONNECTING -> "\u25CC Reconnecting..."
                         }
                     )
                 },
@@ -76,19 +78,38 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Server URL (simplified display)
+            // Server URL
             Text(
                 text = "Hermes Server",
                 style = MaterialTheme.typography.caption3,
                 color = HermesColors.SystemGray,
                 textAlign = TextAlign.Center
             )
-            Text(
-                text = serverUrl,
-                style = MaterialTheme.typography.body2,
-                color = HermesColors.OnSurface,
-                textAlign = TextAlign.Center,
-                maxLines = 2
+            Chip(
+                onClick = {
+                    // Cycle through preset options for easy configuration
+                    val presets = listOf(
+                        "http://10.0.0.100:8080",
+                        "http://192.168.1.100:8080",
+                        "http://localhost:8080",
+                    )
+                    val current = serverUrl
+                    val next = presets.getOrElse((presets.indexOf(current) + 1) % presets.size) { presets[0] }
+                    serverUrl = next
+                    viewModel.updateServerUrl(next)
+                },
+                label = {
+                    Text(
+                        text = serverUrl.ifBlank { "Tap to set URL" },
+                        maxLines = 2,
+                        style = MaterialTheme.typography.body2
+                    )
+                },
+                colors = ChipDefaults.chipColors(
+                    backgroundColor = HermesColors.SurfaceVariant,
+                    contentColor = HermesColors.OnSurface
+                ),
+                modifier = Modifier.fillMaxWidth()
             )
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -154,13 +175,7 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(12.dp))
 
             // Back button
-            Button(onClick = onBack) {
-                Text(
-                    text = "← Back",
-                    style = MaterialTheme.typography.button,
-                    color = HermesColors.Primary
-                )
-            }
+            Chip(onClick = onBack, label = { Text("\u2190 Back", style = MaterialTheme.typography.button, color = HermesColors.Primary) })
         }
     }
 }

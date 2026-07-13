@@ -9,8 +9,8 @@ import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
+import com.hermes.wear.HermesWearApp
 import com.hermes.wear.data.model.*
-import com.hermes.wear.data.network.HermesApiClient
 import com.hermes.wear.data.repository.PreferenceHelper
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -23,7 +23,7 @@ import kotlinx.coroutines.flow.*
 class HermesConnectionService : LifecycleService() {
 
     private lateinit var preferenceHelper: PreferenceHelper
-    private var apiClient: HermesApiClient? = null
+    private var apiClient = HermesWearApp.instance.apiClient
     private var serviceScope: CoroutineScope? = null
 
     private var wakeLock: PowerManager.WakeLock? = null
@@ -92,10 +92,9 @@ class HermesConnectionService : LifecycleService() {
         }
 
         serviceScope = lifecycleScope
-        apiClient = HermesApiClient(preferenceHelper.serverUrl)
 
         lifecycleScope.launch {
-            apiClient!!.connectWebSocket(
+            apiClient.connectWebSocket(
                 onOpen = {
                     updateNotification("Connected to Hermes")
                 },
@@ -105,6 +104,9 @@ class HermesConnectionService : LifecycleService() {
                 },
                 onFailure = { error ->
                     updateNotification("Connection error: ${error.message}")
+                    // Disconnect old client to prevent stacking connections
+                    apiClient.disconnect()
+                    wakeLock?.let { if (it.isHeld) it.release() }
                     // Retry after delay
                     lifecycleScope.launch {
                         delay(10000)
@@ -114,7 +116,7 @@ class HermesConnectionService : LifecycleService() {
             )
 
             // Process incoming messages
-            val messageChannel = apiClient!!.observeMessages()
+            val messageChannel = apiClient.observeMessages()
             for (payload in messageChannel) {
                 when (payload.type) {
                     PayloadType.MESSAGE -> {
@@ -140,7 +142,7 @@ class HermesConnectionService : LifecycleService() {
     }
 
     private fun stopConnection() {
-        apiClient?.disconnect()
+        apiClient.disconnect()
         wakeLock?.let {
             if (it.isHeld) it.release()
         }

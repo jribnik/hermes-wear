@@ -1,14 +1,19 @@
 package com.hermes.wear.ui
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.speech.RecognizerIntent
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.*
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.wear.compose.navigation.SwipeDismissableNavHost
 import androidx.wear.compose.navigation.composable
@@ -20,11 +25,6 @@ import com.hermes.wear.ui.theme.WearHermesColors
 import kotlinx.coroutines.launch
 import androidx.wear.compose.material.MaterialTheme
 
-/**
- * Main entry point for the Hermes Wear app.
- * Handles navigation between conversation, approval, and settings screens.
- * Integrates voice input via Android's Speech Recognizer.
- */
 class MainActivity : ComponentActivity() {
 
     private val viewModel: HermesViewModel by viewModels()
@@ -43,10 +43,19 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // Notification permission launcher (Android 13+ / Wear OS 4+)
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (!granted) {
+            Toast.makeText(this, "Notification permission needed for background alerts", Toast.LENGTH_LONG).show()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Also allow starting from system (e.g., for voice "Hey Google, talk to Hermes")
+        requestNotificationPermission()
         handleIntent(intent)
 
         setContent {
@@ -61,8 +70,17 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
     }
 
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+
     private fun handleIntent(intent: Intent) {
-        // Handle pre-filled text from complication or notification taps
         val messageText = intent.getStringExtra("EXTRA_MESSAGE_TEXT")
         if (!messageText.isNullOrBlank()) {
             lifecycleScope.launch {
@@ -77,7 +95,6 @@ class MainActivity : ComponentActivity() {
         val navController = rememberSwipeDismissableNavController()
         val currentApproval by viewModel.currentApproval.collectAsState()
 
-        // If there's a pending approval, show the approval screen
         val approval = currentApproval
         if (approval != null) {
             ApprovalScreen(
@@ -121,11 +138,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun launchVoiceInput() {
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to Hermes...")
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+        try {
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to Hermes...")
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            }
+            voiceInputLauncher.launch(intent)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Voice input not available on this device", Toast.LENGTH_SHORT).show()
         }
-        voiceInputLauncher.launch(intent)
     }
 }
