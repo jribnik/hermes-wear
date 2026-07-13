@@ -37,7 +37,7 @@ fun SettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .background(HermesColors.Background)
-                .padding(start = 12.dp, end = 12.dp),
+                .padding(start = 20.dp, end = 20.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             contentPadding = PaddingValues(top = 12.dp, bottom = 12.dp)

@@ -31,12 +31,7 @@ class HermesWearApp : Application() {
         instance = this
         preferenceHelper = PreferenceHelper(this)
 
-        if (preferenceHelper.autoConnect) {
-            try {
-                HermesConnectionService.start(this)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to start connection service", e)
-            }
-        }
+        // skip auto-connect here — ViewModel handles it on launch
+        // (the foreground service WebSocket path is unused with HTTP-only API Server)
     }
 }

@@ -43,6 +43,8 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                 _currentApproval.value = approvals.lastOrNull()
             }
         }
+        // Auto-connect on launch
+        connectToHermes()
     }
 
     val messages: StateFlow<List<HermesMessage>> = repository.messages
