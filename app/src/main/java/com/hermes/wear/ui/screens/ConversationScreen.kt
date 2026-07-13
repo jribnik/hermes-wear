@@ -6,7 +6,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.items
@@ -21,8 +20,9 @@ import com.hermes.wear.ui.components.MessageBubble
 import com.hermes.wear.ui.theme.HermesColors
 
 /**
- * Main conversation screen showing the message history with Hermes.
- * Scrollable list of messages with voice input button at the bottom.
+ * Main conversation screen with round-screen-safe layout.
+ * Uses ScalingLazyColumn with contentPadding for bezel-safe scrolling,
+ * plus edge padding on fixed header/footer elements.
  */
 @Composable
 fun ConversationScreen(
@@ -34,7 +34,6 @@ fun ConversationScreen(
     val connectionStatus by viewModel.connectionStatus.collectAsState()
     val listState = rememberScalingLazyListState()
 
-    // Auto-scroll to bottom when new messages arrive
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size - 1)
@@ -49,28 +48,25 @@ fun ConversationScreen(
                 .fillMaxSize()
                 .background(HermesColors.Background)
         ) {
-            Column(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp)
+            ) {
                 // Connection status bar
                 ConnectionStatusIndicator(
                     status = connectionStatus,
                     onTap = { viewModel.connectToHermes() }
                 )
 
-                // Message list
                 if (messages.isEmpty()) {
-                    // Empty state
                     Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = if (connectionStatus == ConnectionStatus.CONNECTED) {
-                                "Say something to Hermes"
-                            } else {
-                                "Connecting to Hermes..."
-                            },
+                            text = if (connectionStatus == ConnectionStatus.CONNECTED)
+                                "Say something to Hermes" else "Connecting to Hermes...",
                             style = MaterialTheme.typography.body2,
                             color = HermesColors.SystemGray,
                             textAlign = TextAlign.Center
@@ -79,10 +75,10 @@ fun ConversationScreen(
                 } else {
                     ScalingLazyColumn(
                         state = listState,
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                        autoCentering = null
                     ) {
                         items(messages, key = { it.id }) { message ->
                             MessageBubble(message = message)
@@ -112,7 +108,6 @@ private fun ActionBar(
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Voice input button
         Chip(
             onClick = onVoiceInput,
             label = { Text("🎤 Speak") },
@@ -122,10 +117,7 @@ private fun ActionBar(
             ),
             modifier = Modifier.weight(1f)
         )
-
         Spacer(modifier = Modifier.width(6.dp))
-
-        // Settings button
         Chip(
             onClick = onSettings,
             label = { Text("⚙️") },

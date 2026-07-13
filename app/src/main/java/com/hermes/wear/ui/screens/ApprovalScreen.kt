@@ -51,6 +51,7 @@ fun ApprovalScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .background(HermesColors.Surface)
+                .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp)
         ) {
             if (secondsRemaining <= 0) {
                 // Timed out state
