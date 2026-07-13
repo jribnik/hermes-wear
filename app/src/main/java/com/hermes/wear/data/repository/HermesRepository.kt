@@ -46,6 +46,7 @@ class HermesRepository(
      */
     fun startLongPollingFallback() {
         scope.launch {
+            apiClient.reactivate()
             apiClient.startLongPolling(
                 onMessage = { payload -> _incomingMessages.tryEmit(payload) },
                 onError = { /* silent retry */ }

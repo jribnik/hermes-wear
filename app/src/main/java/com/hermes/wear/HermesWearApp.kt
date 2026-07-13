@@ -2,18 +2,19 @@ package com.hermes.wear
 
 import android.app.Application
 import com.hermes.wear.data.network.HermesApiClient
+import com.hermes.wear.data.repository.HermesRepository
 import com.hermes.wear.data.repository.PreferenceHelper
 import com.hermes.wear.service.HermesConnectionService
 
 /**
  * Application class for Hermes Wear.
- * Creates a single shared HermesApiClient and starts the background
- * connection service if auto-connect is enabled.
+ * Owns process-lifetime singletons: one HermesApiClient, one HermesRepository.
  *
- * Architecture note: the service owns the persistent WebSocket connection;
- * the ViewModel uses the same shared client for HTTP requests (send message,
- * approve/deny) but does NOT open a second WebSocket. This prevents
- * duplicate connections with the same client ID.
+ * Architecture:
+ * - Service owns WebSocket connection, consumes observeMessages() once,
+ *   feeds payloads into repository.incomingMessages SharedFlow.
+ * - ViewModel observes repository.incomingMessages, uses HTTP methods only.
+ * - Both share the same repository instance — messages reach UI.
  */
 class HermesWearApp : Application() {
 
@@ -27,6 +28,10 @@ class HermesWearApp : Application() {
 
     val apiClient: HermesApiClient by lazy {
         HermesApiClient(preferenceHelper.serverUrl)
+    }
+
+    val repository: HermesRepository by lazy {
+        HermesRepository(apiClient)
     }
 
     override fun onCreate() {

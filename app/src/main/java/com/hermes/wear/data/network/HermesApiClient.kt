@@ -203,6 +203,14 @@ class HermesApiClient(
     }
 
     /**
+     * Re-enable the long-poll loop after a disconnect
+     * (e.g., before falling back to long-polling on WS failure).
+     */
+    fun reactivate() {
+        active.set(true)
+    }
+
+    /**
      * Full shutdown — use only at process exit.
      */
     fun shutdown() {
