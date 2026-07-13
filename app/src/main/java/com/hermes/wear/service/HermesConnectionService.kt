@@ -30,6 +30,7 @@ class HermesConnectionService : LifecycleService() {
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var observeJob: Job? = null
+    private var isConnecting = false
 
     companion object {
         const val CHANNEL_ID = "hermes_connection"
@@ -67,6 +68,9 @@ class HermesConnectionService : LifecycleService() {
     }
 
     private fun startConnection() {
+        if (isConnecting) return
+        isConnecting = true
+
         val notification = buildServiceNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
@@ -126,6 +130,7 @@ class HermesConnectionService : LifecycleService() {
     }
 
     private fun stopConnection() {
+        isConnecting = false
         apiClient.disconnect()
         wakeLock?.let { if (it.isHeld) it.release() }
         stopForeground(STOP_FOREGROUND_REMOVE)
