@@ -16,8 +16,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Manages the HTTP and WebSocket connection to the Hermes Gateway API.
  */
 class HermesApiClient(
-    private val baseUrl: String
+    baseUrl: String
 ) {
+    @Volatile var baseUrl: String = baseUrl
     private val gson = Gson()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
@@ -191,20 +192,22 @@ class HermesApiClient(
     }
 
     /**
-     * Disconnect WebSocket and clean up resources.
+     * Disconnect WebSocket (does NOT close the message channel —
+     * that channel is reused across reconnections to avoid
+     * permanently breaking the singleton client).
      */
     fun disconnect() {
         active.set(false)
         webSocket?.close(1000, "User disconnected")
         webSocket = null
-        incomingMessages.close()
     }
 
     /**
-     * Close the HTTP client.
+     * Full shutdown — use only at process exit.
      */
     fun shutdown() {
         disconnect()
+        incomingMessages.close()
         client.dispatcher.executorService.shutdown()
         client.connectionPool.evictAll()
     }

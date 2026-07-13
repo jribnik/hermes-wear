@@ -53,7 +53,7 @@ fun ConversationScreen(
                 // Connection status bar
                 ConnectionStatusIndicator(
                     status = connectionStatus,
-                    onTap = { viewModel.connectToHermes() }
+                    onTap = {}
                 )
 
                 // Message list

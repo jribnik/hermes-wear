@@ -7,8 +7,11 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 
 /**
- * Repository that manages the conversation state and mediates between
- * the UI and the Hermes API client.
+ * Repository that manages the conversation state. HTTP-only operations
+ * (send, approve, deny) through the shared HermesApiClient.
+ *
+ * The HermesConnectionService owns the WebSocket connection and feeds
+ * incoming messages into incomingMessages flow via startObserving().
  */
 class HermesRepository(
     private val apiClient: HermesApiClient
@@ -19,108 +22,54 @@ class HermesRepository(
     private val _pendingApprovals = MutableStateFlow<List<ApprovalRequest>>(emptyList())
     val pendingApprovals: StateFlow<List<ApprovalRequest>> = _pendingApprovals.asStateFlow()
 
-    private val _connectionState = MutableStateFlow(ConnectionUiState())
-    val connectionState: StateFlow<ConnectionUiState> = _connectionState.asStateFlow()
-
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var longPollingJob: Job? = null
+
+    /** Shared flow of incoming payloads — written by Service, read by ViewModel. */
+    private val _incomingMessages = MutableSharedFlow<HermesWebhookPayload>(replay = 0)
+    val incomingMessages: SharedFlow<HermesWebhookPayload> = _incomingMessages.asSharedFlow()
 
     /**
-     * Start receiving messages via WebSocket.
+     * Called by HermesConnectionService to relay incoming WebSocket payloads
+     * into the repository for UI consumption.
      */
-    fun startConnection(serverUrl: String) {
-        _connectionState.update { it.copy(status = ConnectionStatus.RECONNECTING, serverUrl = serverUrl) }
-
-        apiClient.connectWebSocket(
-            onOpen = {
-                _connectionState.update { it.copy(status = ConnectionStatus.CONNECTED, error = null) }
-                scope.launch { collectMessages() }
-            },
-            onClosed = { code, reason ->
-                _connectionState.update { it.copy(status = ConnectionStatus.DISCONNECTED) }
-                // Attempt long-poll fallback
-                startLongPollingFallback()
-            },
-            onFailure = { error ->
-                _connectionState.update {
-                    it.copy(status = ConnectionStatus.DISCONNECTED, error = error.message)
-                }
-                // Fall back to long-polling
-                startLongPollingFallback()
-            },
-            onReconnecting = {
-                _connectionState.update { it.copy(status = ConnectionStatus.RECONNECTING) }
-            }
-        )
-    }
-
-    /**
-     * Collect WebSocket messages and dispatch to appropriate state holders.
-     */
-    private suspend fun collectMessages() {
-        val channel = apiClient.observeMessages()
-        for (payload in channel) {
-            when (payload.type) {
-                PayloadType.MESSAGE -> {
-                    payload.message?.let { msg ->
-                        _messages.update { current -> current + msg }
-                    }
-                }
-                PayloadType.APPROVAL -> {
-                    payload.approval?.let { approval ->
-                        _pendingApprovals.update { current -> current + approval }
-                    }
-                }
-                PayloadType.HEARTBEAT -> {
-                    _connectionState.update { it.copy(lastHeartbeat = System.currentTimeMillis()) }
-                }
-                PayloadType.STATUS -> {
-                    payload.status?.let { status ->
-                        _connectionState.update { it.copy(status = status) }
-                    }
-                }
+    fun startObserving() {
+        scope.launch {
+            val channel = apiClient.observeMessages()
+            for (payload in channel) {
+                _incomingMessages.emit(payload)
             }
         }
     }
 
     /**
-     * Fallback to HTTP long-polling when WebSocket fails.
+     * Called by the Service on failure — triggers long-poll fallback.
      */
-    private fun startLongPollingFallback() {
-        longPollingJob?.cancel()
-        longPollingJob = scope.launch {
+    fun startLongPollingFallback() {
+        scope.launch {
             apiClient.startLongPolling(
-                onMessage = { payload ->
-                    when (payload.type) {
-                        PayloadType.MESSAGE -> {
-                            payload.message?.let { msg ->
-                                _messages.update { current -> current + msg }
-                            }
-                        }
-                        PayloadType.APPROVAL -> {
-                            payload.approval?.let { approval ->
-                                _pendingApprovals.update { current -> current + approval }
-                            }
-                        }
-                        PayloadType.HEARTBEAT -> {
-                            _connectionState.update { it.copy(lastHeartbeat = System.currentTimeMillis()) }
-                        }
-                        PayloadType.STATUS -> {
-                            payload.status?.let { status ->
-                                _connectionState.update { it.copy(status = status) }
-                            }
-                        }
-                    }
-                },
-                onError = { error ->
-                    _connectionState.update { it.copy(error = error.message) }
-                }
+                onMessage = { payload -> _incomingMessages.tryEmit(payload) },
+                onError = { /* silent retry */ }
             )
         }
     }
 
+    /** Internal — called by ViewModel after observing. */
+    fun addMessage(msg: HermesMessage) {
+        _messages.update { current -> current + msg }
+    }
+
+    /** Internal — called by ViewModel after observing. */
+    fun addApproval(approval: ApprovalRequest) {
+        _pendingApprovals.update { current -> current + approval }
+    }
+
+    /** Internal */
+    fun updateHeartbeat() {
+        // heartbeat handled at ViewModel layer if needed
+    }
+
     /**
-     * Send a message from the user to Hermes.
+     * Send a message from the user to Hermes via HTTP POST.
      */
     suspend fun sendMessage(text: String): Result<HermesMessage> {
         // Optimistically add the user message
@@ -132,8 +81,7 @@ class HermesRepository(
         _messages.update { current -> current + userMessage }
 
         val result = apiClient.sendMessage(text)
-        result.onSuccess { serverMessage ->
-            // Update optimistic message status
+        result.onSuccess {
             _messages.update { current ->
                 current.map { if (it.id == userMessage.id) it.copy(status = MessageStatus.SENT) else it }
             }
@@ -147,9 +95,6 @@ class HermesRepository(
         return result
     }
 
-    /**
-     * Approve a pending approval request.
-     */
     suspend fun approveRequest(approvalId: String): Result<Unit> {
         val result = apiClient.approveRequest(approvalId)
         result.onSuccess {
@@ -158,9 +103,6 @@ class HermesRepository(
         return result
     }
 
-    /**
-     * Deny a pending approval request.
-     */
     suspend fun denyRequest(approvalId: String): Result<Unit> {
         val result = apiClient.denyRequest(approvalId)
         result.onSuccess {
@@ -169,17 +111,11 @@ class HermesRepository(
         return result
     }
 
-    /**
-     * Stop connection and clean up.
-     */
-    fun stopConnection() {
-        apiClient.disconnect()
-        longPollingJob?.cancel()
-        scope.cancel()
-        _connectionState.update { it.copy(status = ConnectionStatus.DISCONNECTED) }
-    }
-
     fun clearMessages() {
         _messages.value = emptyList()
+    }
+
+    fun stop() {
+        scope.cancel()
     }
 }

@@ -11,20 +11,22 @@ import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import com.hermes.wear.HermesWearApp
 import com.hermes.wear.data.model.*
+import com.hermes.wear.data.repository.HermesRepository
 import com.hermes.wear.data.repository.PreferenceHelper
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.*
 
 /**
- * Foreground service that maintains the WebSocket or long-poll connection
- * to the Hermes Gateway API. Shows a persistent notification while connected
- * and dispatches incoming messages/approvals as Android notifications.
+ * Foreground service that owns the WebSocket connection to the Hermes Gateway.
+ *
+ * Architecture: this service is the sole consumer of HermesApiClient.observeMessages().
+ * It relays payloads to a HermesRepository SharedFlow for UI consumption, and independently
+ * posts Android notifications for background delivery.
  */
 class HermesConnectionService : LifecycleService() {
 
     private lateinit var preferenceHelper: PreferenceHelper
-    private var apiClient = HermesWearApp.instance.apiClient
-    private var serviceScope: CoroutineScope? = null
+    private val apiClient = HermesWearApp.instance.apiClient
+    private val repository = HermesRepository(apiClient)
 
     private var wakeLock: PowerManager.WakeLock? = null
 
@@ -82,16 +84,16 @@ class HermesConnectionService : LifecycleService() {
             startForeground(NOTIFICATION_ID, notification)
         }
 
-        // Acquire partial wake lock to keep connection alive
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "HermesWear:ConnectionWakeLock"
         ).apply {
-            acquire(10 * 60 * 1000L) // 10 min timeout
+            acquire(10 * 60 * 1000L)
         }
 
-        serviceScope = lifecycleScope
+        // Start relaying WebSocket messages to the repository for UI
+        repository.startObserving()
 
         lifecycleScope.launch {
             apiClient.connectWebSocket(
@@ -104,10 +106,11 @@ class HermesConnectionService : LifecycleService() {
                 },
                 onFailure = { error ->
                     updateNotification("Connection error: ${error.message}")
-                    // Disconnect old client to prevent stacking connections
+                    // Disconnect (soft — keeps channel alive) and try long-poll
                     apiClient.disconnect()
                     wakeLock?.let { if (it.isHeld) it.release() }
-                    // Retry after delay
+                    repository.startLongPollingFallback()
+                    // Retry WebSocket after delay
                     lifecycleScope.launch {
                         delay(10000)
                         startConnection()
@@ -115,7 +118,7 @@ class HermesConnectionService : LifecycleService() {
                 }
             )
 
-            // Process incoming messages
+            // Process incoming messages — sole consumer of the channel
             val messageChannel = apiClient.observeMessages()
             for (payload in messageChannel) {
                 when (payload.type) {
@@ -132,10 +135,9 @@ class HermesConnectionService : LifecycleService() {
                         }
                     }
                     PayloadType.HEARTBEAT -> {
-                        // Keep alive; update notification timestamp
                         updateNotification("Connected to Hermes")
                     }
-                    PayloadType.STATUS -> { /* handled elsewhere */ }
+                    PayloadType.STATUS -> { /* handled via repository */ }
                 }
             }
         }
@@ -152,46 +154,24 @@ class HermesConnectionService : LifecycleService() {
 
     private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            // Main connection channel
             val connectionChannel = NotificationChannel(
-                CHANNEL_ID,
-                CHANNEL_NAME,
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Shows when Hermes is connected"
-                setShowBadge(false)
-            }
+                CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_LOW
+            ).apply { description = "Shows when Hermes is connected"; setShowBadge(false) }
 
-            // Message channel
             val messageChannel = NotificationChannel(
-                MESSAGE_CHANNEL_ID,
-                "Hermes Messages",
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "New messages from Hermes"
-                enableVibration(true)
-            }
+                MESSAGE_CHANNEL_ID, "Hermes Messages", NotificationManager.IMPORTANCE_HIGH
+            ).apply { description = "New messages from Hermes"; enableVibration(true) }
 
-            // Approval channel
             val approvalChannel = NotificationChannel(
-                APPROVAL_CHANNEL_ID,
-                "Hermes Approvals",
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "Approval requests from Hermes"
-                enableVibration(true)
-                setBypassDnd(true)
-            }
+                APPROVAL_CHANNEL_ID, "Hermes Approvals", NotificationManager.IMPORTANCE_HIGH
+            ).apply { description = "Approval requests from Hermes"; enableVibration(true); setBypassDnd(true) }
 
             val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannels(
-                listOf(connectionChannel, messageChannel, approvalChannel)
-            )
+            manager.createNotificationChannels(listOf(connectionChannel, messageChannel, approvalChannel))
         }
     }
 
     private fun buildServiceNotification(): Notification {
-        // Intent to open the app
         val openIntent = Intent(this, com.hermes.wear.ui.MainActivity::class.java).also {
             it.flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
@@ -199,7 +179,6 @@ class HermesConnectionService : LifecycleService() {
             this, 0, openIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Hermes Wear")
             .setContentText("Connecting...")
@@ -218,14 +197,12 @@ class HermesConnectionService : LifecycleService() {
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
-
         val manager = getSystemService(NotificationManager::class.java)
         manager.notify(NOTIFICATION_ID, notification)
     }
 
     private fun showMessageNotification(message: HermesMessage) {
         if (!preferenceHelper.enableNotifications) return
-
         val intent = Intent(this, com.hermes.wear.ui.MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
         }
@@ -233,7 +210,6 @@ class HermesConnectionService : LifecycleService() {
             this, message.id.hashCode(), intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-
         val notification = NotificationCompat.Builder(this, MESSAGE_CHANNEL_ID)
             .setContentTitle("Hermes")
             .setContentText(message.text)
@@ -243,17 +219,12 @@ class HermesConnectionService : LifecycleService() {
             .setContentIntent(pendingIntent)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .build()
-
         val manager = getSystemService(NotificationManager::class.java)
         manager.notify(message.id.hashCode(), notification)
-
-        // Vibrate if enabled
         if (preferenceHelper.vibrateOnMessage) {
             val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as android.os.Vibrator
             if (vibrator.hasVibrator()) {
-                vibrator.vibrate(
-                    android.os.VibrationEffect.createOneShot(300, android.os.VibrationEffect.DEFAULT_AMPLITUDE)
-                )
+                vibrator.vibrate(android.os.VibrationEffect.createOneShot(300, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
             }
         }
     }
@@ -266,14 +237,10 @@ class HermesConnectionService : LifecycleService() {
             this, approval.id.hashCode(), intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-
         val notification = NotificationCompat.Builder(this, APPROVAL_CHANNEL_ID)
-            .setContentTitle("⚠️ Approval Required")
+            .setContentTitle("\u26A0\uFE0F Approval Required")
             .setContentText(approval.command)
-            .setStyle(
-                NotificationCompat.BigTextStyle()
-                    .bigText("Command: ${approval.command}\n\n${approval.description}")
-            )
+            .setStyle(NotificationCompat.BigTextStyle().bigText("Command: ${approval.command}\n\n${approval.description}"))
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -281,21 +248,16 @@ class HermesConnectionService : LifecycleService() {
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setTimeoutAfter(approval.timeoutSeconds * 1000L)
             .build()
-
         val manager = getSystemService(NotificationManager::class.java)
         manager.notify(approval.id.hashCode(), notification)
-
-        // Strong vibration pattern for approvals
         if (preferenceHelper.vibrateOnApproval) {
             val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as android.os.Vibrator
             if (vibrator.hasVibrator()) {
-                vibrator.vibrate(
-                    android.os.VibrationEffect.createWaveform(
-                        longArrayOf(0, 400, 200, 400),
-                        intArrayOf(0, 255, 0, 255),
-                        -1
-                    )
-                )
+                vibrator.vibrate(android.os.VibrationEffect.createWaveform(
+                    longArrayOf(0, 400, 200, 400),
+                    intArrayOf(0, 255, 0, 255),
+                    -1
+                ))
             }
         }
     }
@@ -304,6 +266,7 @@ class HermesConnectionService : LifecycleService() {
 
     override fun onDestroy() {
         stopConnection()
+        repository.stop()
         super.onDestroy()
     }
 }

@@ -12,8 +12,12 @@ import kotlinx.coroutines.launch
 
 /**
  * Main ViewModel for the Hermes Wear app.
- * Uses the Application-scoped shared HermesApiClient (created by HermesWearApp)
- * so there is only one WebSocket connection to the gateway.
+ *
+ * Uses the shared HermesApiClient for HTTP requests only (send, approve, deny).
+ * The HermesConnectionService owns WebSocket + observe loop and publishes
+ * received messages to the repository for UI consumption via a SharedFlow.
+ *
+ * This avoids the two-consumer race on a single Channel.
  */
 class HermesViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -36,12 +40,32 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     val currentApproval: StateFlow<ApprovalRequest?> = _currentApproval.asStateFlow()
 
     init {
+        val app = application as HermesWearApp
         repository = HermesRepository(app.apiClient)
 
-        // Observe connection state
+        // Observe incoming messages from the repository (fed by the Service)
         viewModelScope.launch {
-            repository.connectionState.collect { state ->
-                _connectionStatus.value = state.status
+            repository.incomingMessages.collect { payload ->
+                when (payload.type) {
+                    PayloadType.MESSAGE -> {
+                        payload.message?.let { msg ->
+                            repository.addMessage(msg)
+                        }
+                    }
+                    PayloadType.APPROVAL -> {
+                        payload.approval?.let { approval ->
+                            repository.addApproval(approval)
+                        }
+                    }
+                    PayloadType.HEARTBEAT -> {
+                        repository.updateHeartbeat()
+                    }
+                    PayloadType.STATUS -> {
+                        payload.status?.let { status ->
+                            _connectionStatus.value = status
+                        }
+                    }
+                }
             }
         }
 
@@ -51,28 +75,10 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                 _currentApproval.value = approvals.lastOrNull()
             }
         }
-
-        // Auto-connect if enabled
-        if (prefs.autoConnect) {
-            connectToHermes()
-        }
     }
 
     val messages: StateFlow<List<HermesMessage>> = repository.messages
     val pendingApprovals: StateFlow<List<ApprovalRequest>> = repository.pendingApprovals
-
-    fun connectToHermes() {
-        viewModelScope.launch {
-            _isLoading.value = true
-            try {
-                repository.startConnection(prefs.serverUrl)
-            } catch (e: Exception) {
-                _error.emit("Connection failed: ${e.message}")
-            } finally {
-                _isLoading.value = false
-            }
-        }
-    }
 
     fun sendMessage(text: String) {
         if (text.isBlank()) return
@@ -112,19 +118,20 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
 
     fun updateServerUrl(url: String) {
         prefs.serverUrl = url
-        disconnect()
-        connectToHermes()
+        app.apiClient.baseUrl = url
     }
 
     fun getServerUrl(): String = prefs.serverUrl
 
+    fun connectToHermes() {
+        com.hermes.wear.service.HermesConnectionService.start(app)
+    }
+
     fun disconnect() {
-        repository.stopConnection()
-        _connectionStatus.value = ConnectionStatus.DISCONNECTED
+        com.hermes.wear.service.HermesConnectionService.stop(app)
     }
 
     override fun onCleared() {
         super.onCleared()
-        repository.stopConnection()
     }
 }
