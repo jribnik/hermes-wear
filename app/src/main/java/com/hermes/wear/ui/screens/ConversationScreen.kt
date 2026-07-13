@@ -2,15 +2,15 @@ package com.hermes.wear.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
+import androidx.wear.compose.foundation.lazy.items
+import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.material.*
 import com.hermes.wear.data.model.ConnectionStatus
 import com.hermes.wear.data.model.HermesMessage
@@ -32,7 +32,7 @@ fun ConversationScreen(
 ) {
     val messages by viewModel.messages.collectAsState()
     val connectionStatus by viewModel.connectionStatus.collectAsState()
-    val listState = rememberLazyListState()
+    val listState = rememberScalingLazyListState()
 
     // Auto-scroll to bottom when new messages arrive
     LaunchedEffect(messages.size) {
@@ -77,14 +77,12 @@ fun ConversationScreen(
                         )
                     }
                 } else {
-                    LazyColumn(
+                    ScalingLazyColumn(
                         state = listState,
                         modifier = Modifier
                             .weight(1f)
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                        contentPadding = PaddingValues(vertical = 8.dp)
+                            .fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         items(messages, key = { it.id }) { message ->
                             MessageBubble(message = message)
@@ -110,7 +108,7 @@ private fun ActionBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
     ) {
