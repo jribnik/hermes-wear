@@ -28,6 +28,9 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     val currentApproval: StateFlow<ApprovalRequest?> = _currentApproval.asStateFlow()
 
     init {
+        // Bridge the apiClient channel to the repository SharedFlow
+        repository.startObserving()
+
         viewModelScope.launch {
             repository.incomingMessages.collect { payload ->
                 when (payload.type) {
