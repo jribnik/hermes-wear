@@ -9,6 +9,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
+import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.material.*
 import com.hermes.wear.data.model.ApprovalRequest
 import com.hermes.wear.data.model.RiskLevel
@@ -81,112 +83,114 @@ fun ApprovalScreen(
                     )
                 }
             } else {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(12.dp),
+                val listState = rememberScalingLazyListState()
+                ScalingLazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     // Risk level header
-                    RiskBadge(riskLevel = approval.riskLevel)
-
-                    Spacer(modifier = Modifier.height(8.dp))
+                    item { RiskBadge(riskLevel = approval.riskLevel) }
 
                     // Command description
-                    Text(
-                        text = "Hermes wants to run:",
-                        style = MaterialTheme.typography.caption3,
-                        color = HermesColors.SystemGray,
-                        textAlign = TextAlign.Center
-                    )
-
-                    Spacer(modifier = Modifier.height(4.dp))
+                    item {
+                        Text(
+                            text = "Hermes wants to run:",
+                            style = MaterialTheme.typography.caption3,
+                            color = HermesColors.SystemGray,
+                            textAlign = TextAlign.Center
+                        )
+                    }
 
                     // The actual command
-                    Text(
-                        text = approval.command,
-                        style = MaterialTheme.typography.body2,
-                        color = HermesColors.OnBackground,
-                        textAlign = TextAlign.Center,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis,
-                        fontWeight = FontWeight.Medium
-                    )
+                    item {
+                        Text(
+                            text = approval.command,
+                            style = MaterialTheme.typography.body2,
+                            color = HermesColors.OnBackground,
+                            textAlign = TextAlign.Center,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
 
                     // Description if available
                     if (approval.description.isNotBlank()) {
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = approval.description,
-                            style = MaterialTheme.typography.caption3,
-                            color = HermesColors.OnSurface,
-                            textAlign = TextAlign.Center,
-                            maxLines = 3,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        item {
+                            Text(
+                                text = approval.description,
+                                style = MaterialTheme.typography.caption3,
+                                color = HermesColors.OnSurface,
+                                textAlign = TextAlign.Center,
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
-
-                    Spacer(modifier = Modifier.height(4.dp))
 
                     // Countdown timer
-                    Text(
-                        text = "⏱ ${secondsRemaining}s",
-                        style = MaterialTheme.typography.caption3,
-                        color = if (secondsRemaining <= 10) HermesColors.RiskCritical
-                                else HermesColors.SystemGray,
-                        textAlign = TextAlign.Center
-                    )
-
-                    Spacer(modifier = Modifier.weight(1f))
-
-                    // Approve / Deny buttons - large, tappable targets
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        // Deny button (left)
-                        Chip(
-                            onClick = onDeny,
-                            label = {
-                                Text(
-                                    text = "✕ Deny",
-                                    style = MaterialTheme.typography.button,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            },
-                            colors = ChipDefaults.chipColors(
-                                backgroundColor = HermesColors.DenyRed,
-                                contentColor = HermesColors.OnPrimary
-                            ),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(48.dp)
-                        )
-
-                        // Approve button (right)
-                        Chip(
-                            onClick = onApprove,
-                            label = {
-                                Text(
-                                    text = "✓ Approve",
-                                    style = MaterialTheme.typography.button,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            },
-                            colors = ChipDefaults.chipColors(
-                                backgroundColor = HermesColors.ApprovalGreen,
-                                contentColor = HermesColors.OnPrimary
-                            ),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(48.dp)
+                    item {
+                        Text(
+                            text = "⏱ ${secondsRemaining}s",
+                            style = MaterialTheme.typography.caption3,
+                            color = if (secondsRemaining <= 10) HermesColors.RiskCritical
+                                    else HermesColors.SystemGray,
+                            textAlign = TextAlign.Center
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    // Approve / Deny buttons - large, tappable targets
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Deny button (left)
+                            Chip(
+                                onClick = onDeny,
+                                label = {
+                                    Text(
+                                        text = "✕ Deny",
+                                        style = MaterialTheme.typography.button,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                },
+                                colors = ChipDefaults.chipColors(
+                                    backgroundColor = HermesColors.DenyRed,
+                                    contentColor = HermesColors.OnPrimary
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                            )
+
+                            // Approve button (right)
+                            Chip(
+                                onClick = onApprove,
+                                label = {
+                                    Text(
+                                        text = "✓ Approve",
+                                        style = MaterialTheme.typography.button,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                },
+                                colors = ChipDefaults.chipColors(
+                                    backgroundColor = HermesColors.ApprovalGreen,
+                                    contentColor = HermesColors.OnPrimary
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                            )
+                        }
+                    }
 
                     // Dismiss / ignore button
-                    Chip(onClick = onDismiss, label = { Text("Ignore", style = MaterialTheme.typography.caption3, color = HermesColors.SystemGray) })
+                    item {
+                        Chip(onClick = onDismiss, label = { Text("Ignore", style = MaterialTheme.typography.caption3, color = HermesColors.SystemGray) })
+                    }
                 }
             }
         }
