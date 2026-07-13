@@ -13,6 +13,7 @@ import com.hermes.wear.HermesWearApp
 import com.hermes.wear.data.model.*
 import com.hermes.wear.data.repository.PreferenceHelper
 import kotlinx.coroutines.*
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Foreground service that owns the WebSocket connection.
@@ -30,7 +31,7 @@ class HermesConnectionService : LifecycleService() {
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var observeJob: Job? = null
-    private var isConnecting = false
+    private val isConnecting = AtomicBoolean(false)
 
     companion object {
         const val CHANNEL_ID = "hermes_connection"
@@ -68,8 +69,7 @@ class HermesConnectionService : LifecycleService() {
     }
 
     private fun startConnection() {
-        if (isConnecting) return
-        isConnecting = true
+        if (!isConnecting.compareAndSet(false, true)) return
 
         val notification = buildServiceNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -109,7 +109,11 @@ class HermesConnectionService : LifecycleService() {
 
         lifecycleScope.launch {
             apiClient.connectWebSocket(
-                onOpen = { updateNotification("Connected to Hermes") },
+                onOpen = {
+                    // WebSocket is back — stop the long-poll fallback so they don't both run.
+                    repository.stopLongPollingFallback()
+                    updateNotification("Connected to Hermes")
+                },
                 onClosed = { _, _ ->
                     updateNotification("Connection closed")
                     stopSelf()
@@ -120,6 +124,8 @@ class HermesConnectionService : LifecycleService() {
                     wakeLock?.let { if (it.isHeld) it.release() }
                     // Fall back to long polling via repository
                     repository.startLongPollingFallback()
+                    // Allow the retry below to actually reconnect.
+                    isConnecting.set(false)
                     lifecycleScope.launch {
                         delay(10000)
                         startConnection()
@@ -130,7 +136,7 @@ class HermesConnectionService : LifecycleService() {
     }
 
     private fun stopConnection() {
-        isConnecting = false
+        isConnecting.set(false)
         apiClient.disconnect()
         wakeLock?.let { if (it.isHeld) it.release() }
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -177,7 +183,7 @@ class HermesConnectionService : LifecycleService() {
             .setPriority(NotificationCompat.PRIORITY_HIGH).setContentIntent(pi).setCategory(NotificationCompat.CATEGORY_MESSAGE).build()
         getSystemService(NotificationManager::class.java).notify(message.id.hashCode(), notification)
         if (preferenceHelper.vibrateOnMessage) {
-            val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as android.os.Vibrator
+            val vibrator = getVibrator()
             if (vibrator.hasVibrator()) vibrator.vibrate(android.os.VibrationEffect.createOneShot(300, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
         }
     }
@@ -193,8 +199,22 @@ class HermesConnectionService : LifecycleService() {
             .setTimeoutAfter(approval.timeoutSeconds * 1000L).build()
         getSystemService(NotificationManager::class.java).notify(approval.id.hashCode(), notification)
         if (preferenceHelper.vibrateOnApproval) {
-            val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as android.os.Vibrator
+            val vibrator = getVibrator()
             if (vibrator.hasVibrator()) vibrator.vibrate(android.os.VibrationEffect.createWaveform(longArrayOf(0, 400, 200, 400), intArrayOf(0, 255, 0, 255), -1))
+        }
+    }
+
+    /**
+     * VIBRATOR_SERVICE is deprecated on API 31+ in favor of VibratorManager,
+     * but minSdk (30) still needs the old path.
+     */
+    private fun getVibrator(): android.os.Vibrator {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as android.os.VibratorManager
+            vibratorManager.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            getSystemService(Context.VIBRATOR_SERVICE) as android.os.Vibrator
         }
     }
 
@@ -203,7 +223,6 @@ class HermesConnectionService : LifecycleService() {
     override fun onDestroy() {
         stopConnection()
         observeJob?.cancel()
-        repository.stop()
         super.onDestroy()
     }
 }

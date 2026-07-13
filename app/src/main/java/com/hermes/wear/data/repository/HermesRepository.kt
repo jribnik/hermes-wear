@@ -5,6 +5,7 @@ import com.hermes.wear.data.network.HermesApiClient
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Repository that manages the conversation state. HTTP-only operations
@@ -28,11 +29,17 @@ class HermesRepository(
     private val _incomingMessages = MutableSharedFlow<HermesWebhookPayload>(replay = 0)
     val incomingMessages: SharedFlow<HermesWebhookPayload> = _incomingMessages.asSharedFlow()
 
+    private val observingStarted = AtomicBoolean(false)
+    private var longPollJob: Job? = null
+
     /**
      * Called by HermesConnectionService to relay incoming WebSocket payloads
-     * into the repository for UI consumption.
+     * into the repository for UI consumption. Safe to call more than once
+     * (e.g. across service restarts) — only the first call starts the
+     * consumer, since the underlying channel supports only a single reader.
      */
     fun startObserving() {
+        if (!observingStarted.compareAndSet(false, true)) return
         scope.launch {
             val channel = apiClient.observeMessages()
             for (payload in channel) {
@@ -45,13 +52,24 @@ class HermesRepository(
      * Called by the Service on failure — triggers long-poll fallback.
      */
     fun startLongPollingFallback() {
-        scope.launch {
+        longPollJob?.cancel()
+        longPollJob = scope.launch {
             apiClient.reactivate()
             apiClient.startLongPolling(
                 onMessage = { payload -> _incomingMessages.tryEmit(payload) },
                 onError = { /* silent retry */ }
             )
         }
+    }
+
+    /**
+     * Called by the Service once the WebSocket has (re)connected —
+     * stops the long-poll fallback so both don't run concurrently.
+     */
+    fun stopLongPollingFallback() {
+        apiClient.stopLongPolling()
+        longPollJob?.cancel()
+        longPollJob = null
     }
 
     /** Internal — called by ViewModel after observing. */
@@ -62,11 +80,6 @@ class HermesRepository(
     /** Internal — called by ViewModel after observing. */
     fun addApproval(approval: ApprovalRequest) {
         _pendingApprovals.update { current -> current + approval }
-    }
-
-    /** Internal */
-    fun updateHeartbeat() {
-        // heartbeat handled at ViewModel layer if needed
     }
 
     /**
@@ -114,9 +127,5 @@ class HermesRepository(
 
     fun clearMessages() {
         _messages.value = emptyList()
-    }
-
-    fun stop() {
-        scope.cancel()
     }
 }

@@ -95,8 +95,7 @@ fun ConversationScreen(
                 // Bottom action bar
                 ActionBar(
                     onVoiceInput = onStartVoiceInput,
-                    onSettings = onOpenSettings,
-                    isConnected = connectionStatus == ConnectionStatus.CONNECTED
+                    onSettings = onOpenSettings
                 )
             }
         }
@@ -106,8 +105,7 @@ fun ConversationScreen(
 @Composable
 private fun ActionBar(
     onVoiceInput: () -> Unit,
-    onSettings: () -> Unit,
-    isConnected: Boolean
+    onSettings: () -> Unit
 ) {
     Row(
         modifier = Modifier

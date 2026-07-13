@@ -37,6 +37,7 @@ class HermesApiClient(
     private var webSocket: WebSocket? = null
     private val incomingMessages = Channel<HermesWebhookPayload>(Channel.BUFFERED)
     private val active = AtomicBoolean(true)
+    private var longPollCall: Call? = null
 
     /**
      * Connect to Hermes via WebSocket for real-time messages.
@@ -44,8 +45,7 @@ class HermesApiClient(
     fun connectWebSocket(
         onOpen: () -> Unit = {},
         onClosed: (code: Int, reason: String) -> Unit = { _, _ -> },
-        onFailure: (Throwable) -> Unit = {},
-        onReconnecting: () -> Unit = {}
+        onFailure: (Throwable) -> Unit = {}
     ) {
         val wsUrl = baseUrl.replace("http", "ws") + "/ws/watch"
         val request = Request.Builder()
@@ -178,17 +178,29 @@ class HermesApiClient(
                     .get()
                     .build()
 
-                val response = client.newCall(request).execute()
+                val call = client.newCall(request)
+                longPollCall = call
+                val response = call.execute()
                 if (response.isSuccessful) {
                     val body = response.body?.string() ?: continue
                     val payload = gson.fromJson(body, HermesWebhookPayload::class.java)
                     onMessage(payload)
                 }
             } catch (e: Exception) {
+                if (!active.get()) break // cancelled via stopLongPolling(), not a real error
                 onError(e)
                 delay(5000) // Wait before retry
             }
         }
+    }
+
+    /**
+     * Stop the long-poll loop (e.g., once the WebSocket has reconnected)
+     * without touching the WebSocket connection itself.
+     */
+    fun stopLongPolling() {
+        active.set(false)
+        longPollCall?.cancel()
     }
 
     /**
@@ -197,7 +209,7 @@ class HermesApiClient(
      * permanently breaking the singleton client).
      */
     fun disconnect() {
-        active.set(false)
+        stopLongPolling()
         webSocket?.close(1000, "User disconnected")
         webSocket = null
     }
