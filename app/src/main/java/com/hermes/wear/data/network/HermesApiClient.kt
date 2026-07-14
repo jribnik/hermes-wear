@@ -34,6 +34,11 @@ class HermesApiClient(
         .writeTimeout(15, TimeUnit.SECONDS)
         .pingInterval(30, TimeUnit.SECONDS)
         .addInterceptor(loggingInterceptor)
+        .addInterceptor { chain ->
+            chain.proceed(chain.request().newBuilder()
+                .addHeader("ngrok-skip-browser-warning", "true")
+                .build())
+        }
         .build()
 
     private var webSocket: WebSocket? = null
