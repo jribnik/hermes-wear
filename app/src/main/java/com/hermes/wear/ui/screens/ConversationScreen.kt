@@ -29,6 +29,18 @@ fun ConversationScreen(
     val connectionStatus by viewModel.connectionStatus.collectAsState()
     val listState = rememberScalingLazyListState()
 
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        viewModel.error.collect { errorMessage = it }
+    }
+    // Auto-dismiss the error banner after a few seconds
+    LaunchedEffect(errorMessage) {
+        if (errorMessage != null) {
+            kotlinx.coroutines.delay(4000)
+            errorMessage = null
+        }
+    }
+
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
     }
@@ -47,6 +59,18 @@ fun ConversationScreen(
                     status = connectionStatus,
                     onTap = { viewModel.connectToHermes() }
                 )
+
+                errorMessage?.let { error ->
+                    Text(
+                        text = error,
+                        style = MaterialTheme.typography.caption3,
+                        color = HermesColors.Error,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                    )
+                }
 
                 if (messages.isEmpty()) {
                     Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {

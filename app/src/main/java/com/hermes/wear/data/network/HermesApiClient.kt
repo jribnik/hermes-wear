@@ -1,6 +1,7 @@
 package com.hermes.wear.data.network
 
 import com.google.gson.Gson
+import com.hermes.wear.BuildConfig
 import com.hermes.wear.data.model.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
@@ -24,8 +25,15 @@ class HermesApiClient(
     private val gson = Gson()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
+    // Never log request/response bodies in release builds — they contain the
+    // Bearer token and conversation content.
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
-        level = HttpLoggingInterceptor.Level.BODY
+        level = if (BuildConfig.DEBUG) {
+            HttpLoggingInterceptor.Level.BODY
+        } else {
+            HttpLoggingInterceptor.Level.NONE
+        }
+        redactHeader("Authorization")
     }
 
     private val client = OkHttpClient.Builder()
@@ -95,6 +103,32 @@ class HermesApiClient(
      * Returns a channel of incoming messages from the WebSocket.
      */
     fun observeMessages(): Channel<HermesWebhookPayload> = incomingMessages
+
+    /**
+     * Lightweight reachability check — issues a HEAD request against the
+     * server root without posting anything to the conversation. Any HTTP
+     * response (even an error status) means the server is reachable.
+     */
+    suspend fun checkHealth(): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder()
+                .url(baseUrl)
+                .head()
+                .addHeader("Authorization", "Bearer $apiKey")
+                .addHeader("X-Client-Type", "wear_os")
+                .addHeader("X-Client-ID", "pixel_watch_4")
+                .build()
+            // The shared client has no read timeout (long-lived connections);
+            // bound the health check so it can't hang indefinitely.
+            val healthClient = client.newBuilder()
+                .readTimeout(10, TimeUnit.SECONDS)
+                .build()
+            healthClient.newCall(request).execute().use { }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 
     /**
      * Send a text message to Hermes via the OpenAI Responses API and relay
