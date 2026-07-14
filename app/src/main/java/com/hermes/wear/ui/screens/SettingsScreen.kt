@@ -95,8 +95,8 @@ fun SettingsScreen(
                     onClick = {
                         // Cycle through preset options for easy configuration
                         val presets = listOf(
+                            "https://dreary-unruffled-storewide.ngrok-free.dev",
                             "http://192.168.50.37:8642",
-                            "http://10.0.0.100:8080",
                             "http://localhost:8642",
                         )
                         val current = serverUrl

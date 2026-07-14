@@ -20,7 +20,7 @@ class PreferenceHelper(context: Context) {
         const val KEY_VIBRATE_ON_MESSAGE = "vibrate_on_message"
         const val KEY_VIBRATE_ON_APPROVAL = "vibrate_on_approval"
         const val KEY_API_KEY = "api_key"
-        const val DEFAULT_SERVER_URL = "http://192.168.50.37:8642"
+        const val DEFAULT_SERVER_URL = "https://dreary-unruffled-storewide.ngrok-free.dev"
         const val DEFAULT_SENDER_ID = "pixel_watch_4"
         const val DEFAULT_API_KEY = "hermes-wear-2026"
     }
