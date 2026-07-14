@@ -70,10 +70,14 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     fun connectToHermes() {
         viewModelScope.launch {
             _connectionStatus.value = ConnectionStatus.RECONNECTING
-            // API Server is HTTP-only (no WebSocket). Send a ping to verify reachability.
-            val result = repository.sendMessage("ping")
+            // API Server is HTTP-only (no WebSocket). Verify reachability with a
+            // HEAD request — nothing is added to the conversation.
+            val result = repository.checkHealth()
             result.onSuccess { _connectionStatus.value = ConnectionStatus.CONNECTED }
-            result.onFailure { _connectionStatus.value = ConnectionStatus.DISCONNECTED }
+            result.onFailure { e ->
+                _connectionStatus.value = ConnectionStatus.DISCONNECTED
+                _error.emit("Can't reach Hermes: ${e.message}")
+            }
         }
     }
 
