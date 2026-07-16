@@ -27,7 +27,9 @@ fun ApprovalScreen(
     onDeny: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    // Auto-deny countdown for timeouts
+    // Auto-timeout countdown — when the timer expires, switch to the timed-out
+    // overlay instead of auto-denying. The user must explicitly dismiss.
+    var isTimedOut by remember(approval.id) { mutableStateOf(false) }
     var secondsRemaining by remember(approval.id) {
         mutableIntStateOf(approval.timeoutSeconds)
     }
@@ -37,10 +39,7 @@ fun ApprovalScreen(
             kotlinx.coroutines.delay(1000)
             secondsRemaining--
         }
-        // Auto-deny when timer expires
-        if (secondsRemaining <= 0) {
-            onDismiss()
-        }
+        isTimedOut = true
     }
 
     Scaffold(
@@ -53,7 +52,7 @@ fun ApprovalScreen(
                 .background(HermesColors.Surface)
                 .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 10.dp)
         ) {
-            if (secondsRemaining <= 0) {
+            if (isTimedOut) {
                 // Timed out state
                 Column(
                     modifier = Modifier.fillMaxSize(),
@@ -142,50 +141,45 @@ fun ApprovalScreen(
                         )
                     }
 
-                    // Approve / Deny buttons - large, tappable targets
+                    // Approve / Deny buttons - stacked full-width for round screens
                     item {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            // Deny button (left)
-                            Chip(
-                                onClick = onDeny,
-                                label = {
-                                    Text(
-                                        text = "✕ Deny",
-                                        style = MaterialTheme.typography.button,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                },
-                                colors = ChipDefaults.chipColors(
-                                    backgroundColor = HermesColors.DenyRed,
-                                    contentColor = HermesColors.OnPrimary
-                                ),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(48.dp)
-                            )
+                        Chip(
+                            onClick = onApprove,
+                            label = {
+                                Text(
+                                    text = "✓ Approve",
+                                    style = MaterialTheme.typography.button,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            },
+                            colors = ChipDefaults.chipColors(
+                                backgroundColor = HermesColors.ApprovalGreen,
+                                contentColor = HermesColors.OnPrimary
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                        )
+                    }
 
-                            // Approve button (right)
-                            Chip(
-                                onClick = onApprove,
-                                label = {
-                                    Text(
-                                        text = "✓ Approve",
-                                        style = MaterialTheme.typography.button,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                },
-                                colors = ChipDefaults.chipColors(
-                                    backgroundColor = HermesColors.ApprovalGreen,
-                                    contentColor = HermesColors.OnPrimary
-                                ),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(48.dp)
-                            )
-                        }
+                    item {
+                        Chip(
+                            onClick = onDeny,
+                            label = {
+                                Text(
+                                    text = "✕ Deny",
+                                    style = MaterialTheme.typography.button,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            },
+                            colors = ChipDefaults.chipColors(
+                                backgroundColor = HermesColors.DenyRed,
+                                contentColor = HermesColors.OnPrimary
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                        )
                     }
 
                     // Dismiss / ignore button
