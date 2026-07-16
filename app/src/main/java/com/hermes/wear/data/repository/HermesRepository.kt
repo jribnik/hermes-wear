@@ -52,6 +52,11 @@ class HermesRepository(
         _pendingApprovals.update { current -> current + approval }
     }
 
+    /** Remove an approval locally without responding — it stays pending server-side. */
+    fun dismissApproval(approvalId: String) {
+        _pendingApprovals.update { current -> current.filter { it.id != approvalId } }
+    }
+
     /** Reachability check — does not add anything to the conversation. */
     suspend fun checkHealth(): Result<Unit> = apiClient.checkHealth()
 

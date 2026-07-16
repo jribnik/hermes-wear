@@ -106,7 +106,9 @@ class MainActivity : ComponentActivity() {
                     viewModel.denyCurrentRequest()
                 },
                 onDismiss = {
-                    viewModel.denyCurrentRequest()
+                    // Just dismiss the overlay — do NOT deny.
+                    // Approval remains pending server-side but the UI goes away.
+                    viewModel.dismissCurrentRequest()
                 }
             )
             return

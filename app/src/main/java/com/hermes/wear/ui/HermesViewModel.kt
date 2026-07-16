@@ -94,6 +94,11 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun dismissCurrentRequest() {
+        val approval = _currentApproval.value ?: return
+        repository.dismissApproval(approval.id)
+    }
+
     fun denyCurrentRequest() {
         val approval = _currentApproval.value ?: return
         viewModelScope.launch {
