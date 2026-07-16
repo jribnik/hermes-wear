@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 class HermesApiClient(
     baseUrl: String,
-    apiKey: String = "hermes-wear-2026"
+    apiKey: String
 ) {
     @Volatile var baseUrl: String = baseUrl
     @Volatile var apiKey: String = apiKey
