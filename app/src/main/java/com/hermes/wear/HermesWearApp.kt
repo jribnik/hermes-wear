@@ -16,7 +16,7 @@ class HermesWearApp : Application() {
         private set
 
     val apiClient: HermesApiClient by lazy {
-        HermesApiClient(preferenceHelper.serverUrl)
+        HermesApiClient(preferenceHelper.serverUrl, preferenceHelper.apiKey)
     }
 
     val repository: HermesRepository by lazy {
