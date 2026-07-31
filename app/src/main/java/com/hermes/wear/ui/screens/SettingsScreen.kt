@@ -93,9 +93,10 @@ fun SettingsScreen(
             item {
                 Chip(
                     onClick = {
-                        // Cycle through preset options for easy configuration
+                        // Cycle through preset options for easy configuration.
+                        // Only local/LAN presets are committed — a public tunnel
+                        // URL in source exposes the gateway endpoint.
                         val presets = listOf(
-                            "https://dreary-unruffled-storewide.ngrok-free.dev",
                             "http://192.168.50.37:8642",
                             "http://localhost:8642",
                         )

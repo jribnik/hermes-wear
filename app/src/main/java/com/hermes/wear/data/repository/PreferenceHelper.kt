@@ -20,9 +20,11 @@ class PreferenceHelper(context: Context) {
         const val KEY_VIBRATE_ON_MESSAGE = "vibrate_on_message"
         const val KEY_VIBRATE_ON_APPROVAL = "vibrate_on_approval"
         const val KEY_API_KEY = "api_key"
-        const val DEFAULT_SERVER_URL = "https://dreary-unruffled-storewide.ngrok-free.dev"
+        // No usable defaults: configure the server URL and API key at runtime.
+        // A real key/endpoint in source is published to anyone reading the repo.
+        const val DEFAULT_SERVER_URL = ""
         const val DEFAULT_SENDER_ID = "pixel_watch_4"
-        const val DEFAULT_API_KEY = "REDACTED-API-KEY"
+        const val DEFAULT_API_KEY = ""
     }
 
     var serverUrl: String
