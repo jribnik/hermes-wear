@@ -34,7 +34,8 @@ fun SettingsScreen(
     var serverUrl by remember { mutableStateOf(viewModel.getServerUrl()) }
     var keySet by remember { mutableStateOf(viewModel.hasApiKey()) }
     var editingKey by remember { mutableStateOf(false) }
-    // Held only while editing; cleared on save/cancel. Never logged or displayed in clear.
+    // Held only while editing; cleared on save and whenever the API Key chip is tapped again
+    // to close the field (there is no separate Cancel). Never logged or displayed in clear.
     var keyInput by remember { mutableStateOf("") }
 
     Scaffold(
