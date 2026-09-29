@@ -37,9 +37,18 @@ class HermesApiClient(
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(0, TimeUnit.MILLISECONDS) // No timeout for long-lived connections
+        // No read timeout: an agent turn can take a long time to answer. The ping
+        // interval keeps HTTP/2 connections alive and surfaces dead ones (e.g. behind
+        // an HTTPS proxy) instead of leaving a call hanging forever.
+        .readTimeout(0, TimeUnit.MILLISECONDS)
         .writeTimeout(15, TimeUnit.SECONDS)
+        .pingInterval(30, TimeUnit.SECONDS)
         .addInterceptor(loggingInterceptor)
+        .addInterceptor { chain ->
+            chain.proceed(chain.request().newBuilder()
+                .addHeader("ngrok-skip-browser-warning", "true")
+                .build())
+        }
         .build()
 
     private val incomingMessages = Channel<HermesWebhookPayload>(Channel.BUFFERED)

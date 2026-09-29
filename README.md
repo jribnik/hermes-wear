@@ -54,6 +54,8 @@ adb shell am start -n com.hermes.wear.debug/com.hermes.wear.ui.MainActivity
 
 `INTERNET`, `RECORD_AUDIO` and `VIBRATE` are declared in the manifest. Voice input uses the system speech recognizer (`RecognizerIntent`).
 
+Note: `app/src/main/res/xml/wear.xml` declares `com.google.android.wearable.standalone`, but nothing references it (the manifest has no such meta-data), so the app is not currently marked as standalone.
+
 ## License
 
 No license file is included in this repository.
