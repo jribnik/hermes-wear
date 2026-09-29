@@ -37,7 +37,6 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
                     PayloadType.MESSAGE -> payload.message?.let { repository.addMessage(it) }
                     PayloadType.APPROVAL -> payload.approval?.let { repository.addApproval(it) }
                     PayloadType.STATUS -> payload.status?.let { _connectionStatus.value = it }
-                    else -> {}
                 }
             }
         }

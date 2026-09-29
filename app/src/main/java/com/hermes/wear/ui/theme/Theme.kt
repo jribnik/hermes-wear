@@ -1,6 +1,5 @@
 package com.hermes.wear.ui.theme
 
-import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.wear.compose.material.Colors
 
@@ -42,5 +41,3 @@ val WearHermesColors = Colors(
     onSurface = HermesColors.OnSurface,
     onError = Color.Black,
 )
-
-val LocalHermesColors = staticCompositionLocalOf { HermesColors }
