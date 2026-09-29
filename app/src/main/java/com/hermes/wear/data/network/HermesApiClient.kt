@@ -11,10 +11,9 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.logging.HttpLoggingInterceptor
 import java.io.IOException
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Manages the HTTP and WebSocket connection to the Hermes Gateway API.
+ * HTTP client for the Hermes Gateway's OpenAI-compatible /v1/responses API.
  */
 class HermesApiClient(
     baseUrl: String,
@@ -40,67 +39,13 @@ class HermesApiClient(
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.MILLISECONDS) // No timeout for long-lived connections
         .writeTimeout(15, TimeUnit.SECONDS)
-        .pingInterval(30, TimeUnit.SECONDS)
         .addInterceptor(loggingInterceptor)
-        .addInterceptor { chain ->
-            chain.proceed(chain.request().newBuilder()
-                .addHeader("ngrok-skip-browser-warning", "true")
-                .build())
-        }
         .build()
 
-    private var webSocket: WebSocket? = null
     private val incomingMessages = Channel<HermesWebhookPayload>(Channel.BUFFERED)
-    private val active = AtomicBoolean(true)
-    private var longPollCall: Call? = null
 
     /**
-     * Connect to Hermes via WebSocket for real-time messages.
-     */
-    fun connectWebSocket(
-        onOpen: () -> Unit = {},
-        onClosed: (code: Int, reason: String) -> Unit = { _, _ -> },
-        onFailure: (Throwable) -> Unit = {}
-    ) {
-        val wsUrl = baseUrl.replace("http", "ws") + "/ws/watch"
-        val request = Request.Builder()
-            .url(wsUrl)
-            .addHeader("Authorization", "Bearer $apiKey")
-            .addHeader("X-Client-Type", "wear_os")
-            .addHeader("X-Client-ID", "pixel_watch_4")
-            .build()
-
-        webSocket = client.newWebSocket(request, object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: Response) {
-                onOpen()
-            }
-
-            override fun onMessage(webSocket: WebSocket, text: String) {
-                try {
-                    val payload = gson.fromJson(text, HermesWebhookPayload::class.java)
-                    incomingMessages.trySend(payload)
-                } catch (e: Exception) {
-                    // Could not parse message; ignore malformed data
-                }
-            }
-
-            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                webSocket.close(1000, null)
-                onClosed(code, reason)
-            }
-
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                onClosed(code, reason)
-            }
-
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                onFailure(t)
-            }
-        })
-    }
-
-    /**
-     * Returns a channel of incoming messages from the WebSocket.
+     * Returns a channel of incoming messages posted by [postToResponsesApi].
      */
     fun observeMessages(): Channel<HermesWebhookPayload> = incomingMessages
 
@@ -133,7 +78,7 @@ class HermesApiClient(
     /**
      * Send a text message to Hermes via the OpenAI Responses API and relay
      * any assistant reply / function-call approvals through the shared
-     * incoming-messages channel (the same channel WebSocket/long-poll use).
+     * incoming-messages channel.
      */
     suspend fun sendMessage(text: String): Result<HermesMessage> = withContext(Dispatchers.IO) {
         postToResponsesApi(text)
@@ -224,77 +169,5 @@ class HermesApiClient(
         } catch (e: Exception) {
             Result.failure(e)
         }
-    }
-
-    /**
-     * HTTP long-poll fallback if WebSocket is not available.
-     * Continuously polls for new messages.
-     */
-    suspend fun startLongPolling(
-        onMessage: (HermesWebhookPayload) -> Unit,
-        onError: (Exception) -> Unit
-    ) {
-        while (active.get()) {
-            try {
-                val request = Request.Builder()
-                    .url("$baseUrl/api/poll/watch?client_id=pixel_watch_4")
-                    .addHeader("Authorization", "Bearer $apiKey")
-                    .addHeader("X-Client-Type", "wear_os")
-                    .addHeader("X-Client-ID", "pixel_watch_4")
-                    .get()
-                    .build()
-
-                val call = client.newCall(request)
-                longPollCall = call
-                val response = call.execute()
-                if (response.isSuccessful) {
-                    val body = response.body?.string() ?: continue
-                    val payload = gson.fromJson(body, HermesWebhookPayload::class.java)
-                    onMessage(payload)
-                }
-            } catch (e: Exception) {
-                if (!active.get()) break // cancelled via stopLongPolling(), not a real error
-                onError(e)
-                delay(5000) // Wait before retry
-            }
-        }
-    }
-
-    /**
-     * Stop the long-poll loop (e.g., once the WebSocket has reconnected)
-     * without touching the WebSocket connection itself.
-     */
-    fun stopLongPolling() {
-        active.set(false)
-        longPollCall?.cancel()
-    }
-
-    /**
-     * Disconnect WebSocket (does NOT close the message channel —
-     * that channel is reused across reconnections to avoid
-     * permanently breaking the singleton client).
-     */
-    fun disconnect() {
-        stopLongPolling()
-        webSocket?.close(1000, "User disconnected")
-        webSocket = null
-    }
-
-    /**
-     * Re-enable the long-poll loop after a disconnect
-     * (e.g., before falling back to long-polling on WS failure).
-     */
-    fun reactivate() {
-        active.set(true)
-    }
-
-    /**
-     * Full shutdown — use only at process exit.
-     */
-    fun shutdown() {
-        disconnect()
-        incomingMessages.close()
-        client.dispatcher.executorService.shutdown()
-        client.connectionPool.evictAll()
     }
 }

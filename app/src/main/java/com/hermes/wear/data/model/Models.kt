@@ -113,10 +113,7 @@ enum class PayloadType {
     APPROVAL,
 
     @SerializedName("status")
-    STATUS,
-
-    @SerializedName("heartbeat")
-    HEARTBEAT
+    STATUS
 }
 
 enum class ConnectionStatus {
@@ -191,13 +188,3 @@ enum class ApprovalDecision {
     @SerializedName("deny")
     DENY
 }
-
-/**
- * Represents the connection state for the UI.
- */
-data class ConnectionUiState(
-    val status: ConnectionStatus = ConnectionStatus.DISCONNECTED,
-    val serverUrl: String = "",
-    val lastHeartbeat: Long = 0L,
-    val error: String? = null
-)
