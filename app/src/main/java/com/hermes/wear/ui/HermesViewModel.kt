@@ -113,4 +113,13 @@ class HermesViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun getServerUrl(): String = prefs.serverUrl
+
+    /** Persist the API key and apply it to the live client. Never log the value. */
+    fun updateApiKey(key: String) {
+        val trimmed = key.trim()
+        prefs.apiKey = trimmed
+        app.apiClient.apiKey = trimmed
+    }
+
+    fun hasApiKey(): Boolean = prefs.apiKey.isNotBlank()
 }

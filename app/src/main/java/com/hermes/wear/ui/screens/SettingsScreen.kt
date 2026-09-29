@@ -2,9 +2,15 @@ package com.hermes.wear.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
@@ -26,6 +32,10 @@ fun SettingsScreen(
 ) {
     val connectionStatus by viewModel.connectionStatus.collectAsState()
     var serverUrl by remember { mutableStateOf(viewModel.getServerUrl()) }
+    var keySet by remember { mutableStateOf(viewModel.hasApiKey()) }
+    var editingKey by remember { mutableStateOf(false) }
+    // Held only while editing; cleared on save/cancel. Never logged or displayed in clear.
+    var keyInput by remember { mutableStateOf("") }
 
     Scaffold(
         vignette = { Vignette(vignettePosition = VignettePosition.TopAndBottom) },
@@ -118,6 +128,85 @@ fun SettingsScreen(
                     ),
                     modifier = Modifier.fillMaxWidth()
                 )
+            }
+
+            // API key (masked; the stored value is never shown)
+            item {
+                Text(
+                    text = "API Key",
+                    style = MaterialTheme.typography.caption3,
+                    color = HermesColors.SystemGray,
+                    textAlign = TextAlign.Center
+                )
+            }
+            item {
+                Chip(
+                    onClick = { editingKey = !editingKey; keyInput = "" },
+                    label = {
+                        Text(
+                            text = if (keySet) "\u25CF Key set (tap to change)" else "\u25CB Not set (tap to enter)",
+                            maxLines = 2,
+                            style = MaterialTheme.typography.body2
+                        )
+                    },
+                    colors = ChipDefaults.chipColors(
+                        backgroundColor = HermesColors.SurfaceVariant,
+                        contentColor = if (keySet) HermesColors.ApprovalGreen else HermesColors.OnSurface
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            if (editingKey) {
+                item {
+                    BasicTextField(
+                        value = keyInput,
+                        onValueChange = { keyInput = it },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        textStyle = MaterialTheme.typography.body2.copy(color = HermesColors.OnSurface),
+                        cursorBrush = SolidColor(HermesColors.Primary),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(HermesColors.SurfaceVariant, RoundedCornerShape(16.dp))
+                            .padding(horizontal = 14.dp, vertical = 10.dp)
+                    )
+                }
+                item {
+                    Chip(
+                        onClick = {
+                            viewModel.updateApiKey(keyInput)
+                            keySet = viewModel.hasApiKey()
+                            keyInput = ""
+                            editingKey = false
+                        },
+                        label = { Text("Save key") },
+                        enabled = keyInput.isNotBlank(),
+                        colors = ChipDefaults.chipColors(
+                            backgroundColor = HermesColors.ApprovalGreen,
+                            contentColor = HermesColors.OnPrimary
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                if (keySet) {
+                    item {
+                        Chip(
+                            onClick = {
+                                viewModel.updateApiKey("")
+                                keySet = false
+                                keyInput = ""
+                                editingKey = false
+                            },
+                            label = { Text("Clear key") },
+                            colors = ChipDefaults.chipColors(
+                                backgroundColor = HermesColors.DenyRed,
+                                contentColor = HermesColors.OnPrimary
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
             }
 
             // Action buttons

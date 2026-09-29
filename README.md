@@ -28,7 +28,7 @@ The app is **HTTP-only**. It keeps no background connection and runs no service.
 There are no usable defaults: no server URL or API key is committed to source.
 
 - **Server URL:** on the watch, open Settings and tap the URL chip. It cycles through a small list of local/LAN presets defined in `ui/screens/SettingsScreen.kt`; edit that list for your own gateway. Cleartext HTTP is allowed (`res/xml/network_security_config.xml`) because the gateway is expected to be on a trusted network.
-- **API key:** stored in the `api_key` SharedPreferences entry. **There is currently no UI to enter it**, so a fresh install sends an empty bearer token until the key is set some other way.
+- **API key:** on the watch, open Settings, tap the *API Key* chip, type the key into the masked field and tap *Save key* (*Clear key* removes it). It is stored in the `api_key` SharedPreferences entry (plaintext app-private storage), is applied to the running client immediately, and is never displayed or logged; the chip only shows whether a key is set. The entry UI is a plain masked text field and has not been tested on a physical watch.
 
 ## Build
 
