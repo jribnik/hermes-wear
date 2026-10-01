@@ -1,22 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Hermes Wear — HTTP-only companion (no WebSocket / foreground service).
-  All communication goes through the OpenAI-compatible /v1/responses
-  endpoint on the Hermes Gateway API Server. No background connection
-  is maintained; the app sends/receives on-demand.
+  Hermes Wear: a standalone watch app that talks to the Hermes gateway over
+  plain request/response HTTP (POST /v1/responses, GET /v1/models). No
+  background service or persistent connection.
+
+  Only INTERNET is needed: voice input goes through the system speech
+  recognizer (RecognizerIntent), which does its own recording.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- Voice input -->
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
-
-    <!-- Vibration for haptic feedback -->
-    <uses-permission android:name="android.permission.VIBRATE" />
-
     <uses-feature android:name="android.hardware.type.watch" />
-    <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
     <application
         android:name=".HermesWearApp"
@@ -26,6 +21,11 @@
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault"
         android:networkSecurityConfig="@xml/network_security_config">
+
+        <!-- Works without a phone companion app. -->
+        <meta-data
+            android:name="com.google.android.wearable.standalone"
+            android:value="true" />
 
         <activity
             android:name=".ui.MainActivity"
@@ -39,7 +39,8 @@
             </intent-filter>
         </activity>
 
-        <!-- Complication data provider service -->
+        <!-- Watch-face complication that just opens the app. Its content never
+             changes, so UPDATE_PERIOD_SECONDS is 0 (no periodic updates). -->
         <service
             android:name=".complication.HermesComplicationService"
             android:exported="true"
@@ -54,7 +55,7 @@
                 android:value="SHORT_TEXT" />
             <meta-data
                 android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS"
-                android:value="300" />
+                android:value="0" />
         </service>
     </application>
 </manifest>
