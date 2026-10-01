@@ -2,123 +2,56 @@ package com.hermes.wear.ui
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.viewModelScope
 import com.hermes.wear.HermesWearApp
-import com.hermes.wear.data.model.*
-import com.hermes.wear.data.repository.PreferenceHelper
-import kotlinx.coroutines.flow.*
-import kotlinx.coroutines.launch
+import com.hermes.wear.data.model.ConnectionStatus
+import com.hermes.wear.data.model.HermesMessage
+import kotlinx.coroutines.flow.StateFlow
 
+/**
+ * Thin UI facade over the app-scoped repository. It holds no state of its
+ * own, so nothing is lost when the Activity (and this ViewModel) goes away.
+ */
 class HermesViewModel(application: Application) : AndroidViewModel(application) {
 
     private val app = application as HermesWearApp
-    private val prefs = PreferenceHelper(application)
-    val repository = app.repository
-
-    private val _isLoading = MutableStateFlow(false)
-    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
-
-    private val _error = MutableSharedFlow<String?>()
-    val error: SharedFlow<String?> = _error.asSharedFlow()
-
-    private val _connectionStatus = MutableStateFlow(ConnectionStatus.DISCONNECTED)
-    val connectionStatus: StateFlow<ConnectionStatus> = _connectionStatus.asStateFlow()
-
-    private val _currentApproval = MutableStateFlow<ApprovalRequest?>(null)
-    val currentApproval: StateFlow<ApprovalRequest?> = _currentApproval.asStateFlow()
-
-    init {
-        // Bridge the apiClient channel to the repository SharedFlow
-        repository.startObserving()
-
-        viewModelScope.launch {
-            repository.incomingMessages.collect { payload ->
-                when (payload.type) {
-                    PayloadType.MESSAGE -> payload.message?.let { repository.addMessage(it) }
-                    PayloadType.APPROVAL -> payload.approval?.let { repository.addApproval(it) }
-                    PayloadType.STATUS -> payload.status?.let { _connectionStatus.value = it }
-                }
-            }
-        }
-        viewModelScope.launch {
-            repository.pendingApprovals.collect { approvals ->
-                _currentApproval.value = approvals.lastOrNull()
-            }
-        }
-        // Auto-connect on launch
-        connectToHermes()
-    }
+    private val prefs = app.preferenceHelper
+    private val repository = app.repository
 
     val messages: StateFlow<List<HermesMessage>> = repository.messages
-    val pendingApprovals: StateFlow<List<ApprovalRequest>> = repository.pendingApprovals
+    val isSending: StateFlow<Boolean> = repository.isSending
+    val connectionStatus: StateFlow<ConnectionStatus> = repository.connectionStatus
+    val error: StateFlow<String?> = repository.error
+
+    init {
+        repository.checkConnection()
+    }
 
     fun sendMessage(text: String) {
-        if (text.isBlank()) return
-        viewModelScope.launch {
-            _isLoading.value = true
-            val result = repository.sendMessage(text)
-            result.onSuccess { _connectionStatus.value = ConnectionStatus.CONNECTED }
-            result.onFailure { e ->
-                _error.emit("Failed: ${e.message}")
-                _connectionStatus.value = ConnectionStatus.DISCONNECTED
-            }
-            _isLoading.value = false
-        }
+        repository.sendMessage(text)
     }
 
-    fun connectToHermes() {
-        viewModelScope.launch {
-            _connectionStatus.value = ConnectionStatus.RECONNECTING
-            // API Server is HTTP-only (no WebSocket). Verify reachability with a
-            // HEAD request — nothing is added to the conversation.
-            val result = repository.checkHealth()
-            result.onSuccess { _connectionStatus.value = ConnectionStatus.CONNECTED }
-            result.onFailure { e ->
-                _connectionStatus.value = ConnectionStatus.DISCONNECTED
-                _error.emit("Can't reach Hermes: ${e.message}")
-            }
-        }
+    fun cancelSend() = repository.cancelSend()
+
+    fun checkConnection() {
+        repository.checkConnection()
     }
 
-    fun disconnect() {
-        _connectionStatus.value = ConnectionStatus.DISCONNECTED
-    }
+    fun clearError() = repository.clearError()
 
-    fun approveCurrentRequest() {
-        val approval = _currentApproval.value ?: return
-        viewModelScope.launch {
-            repository.approveRequest(approval.id)
-                .onSuccess { _currentApproval.value = null }
-                .onFailure { e -> _error.emit("Failed to approve: ${e.message}") }
-        }
-    }
-
-    fun dismissCurrentRequest() {
-        val approval = _currentApproval.value ?: return
-        repository.dismissApproval(approval.id)
-    }
-
-    fun denyCurrentRequest() {
-        val approval = _currentApproval.value ?: return
-        viewModelScope.launch {
-            repository.denyRequest(approval.id)
-                .onSuccess { _currentApproval.value = null }
-                .onFailure { e -> _error.emit("Failed to deny: ${e.message}") }
-        }
-    }
-
-    fun updateServerUrl(url: String) {
-        prefs.serverUrl = url
-        app.apiClient.baseUrl = url
-    }
+    fun startNewConversation() = repository.startNewConversation()
 
     fun getServerUrl(): String = prefs.serverUrl
 
-    /** Persist the API key and apply it to the live client. Never log the value. */
+    /** Saves the (normalized) server URL and re-checks the connection. */
+    fun updateServerUrl(url: String) {
+        prefs.serverUrl = url
+        repository.checkConnection()
+    }
+
+    /** Saves the API key and re-checks the connection. Never log the value. */
     fun updateApiKey(key: String) {
-        val trimmed = key.trim()
-        prefs.apiKey = trimmed
-        app.apiClient.apiKey = trimmed
+        prefs.apiKey = key
+        repository.checkConnection()
     }
 
     fun hasApiKey(): Boolean = prefs.apiKey.isNotBlank()

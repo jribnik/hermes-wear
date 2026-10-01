@@ -2,189 +2,91 @@ package com.hermes.wear.data.model
 
 import com.google.gson.annotations.SerializedName
 
-/**
- * Represents a message in the conversation between the user and Hermes Agent.
- */
+/** One entry in the on-watch conversation list. Kept in memory only. */
 data class HermesMessage(
-    @SerializedName("id")
     val id: String = java.util.UUID.randomUUID().toString(),
-
-    @SerializedName("text")
     val text: String,
-
-    @SerializedName("sender")
     val sender: Sender,
-
-    @SerializedName("timestamp")
     val timestamp: Long = System.currentTimeMillis(),
-
-    @SerializedName("status")
     val status: MessageStatus = MessageStatus.SENT,
-
-    @SerializedName("platform")
-    val platform: String = "wear_os"
 )
 
 enum class Sender {
-    @SerializedName("user")
     USER,
 
-    @SerializedName("hermes")
+    /** An assistant reply (`message` output item). */
     HERMES,
 
-    @SerializedName("system")
-    SYSTEM
+    /** A read-only note, e.g. "Hermes ran terminal" for a tool call the gateway already executed. */
+    SYSTEM,
 }
 
+/** Delivery state of a [Sender.USER] message. */
 enum class MessageStatus {
-    @SerializedName("sending")
     SENDING,
-
-    @SerializedName("sent")
     SENT,
-
-    @SerializedName("delivered")
-    DELIVERED,
-
-    @SerializedName("error")
-    ERROR
+    ERROR,
 }
 
-/**
- * An approval request from Hermes that requires user action.
- * These come when Hermes needs authorization to run shell commands.
- */
-data class ApprovalRequest(
-    @SerializedName("id")
-    val id: String,
-
-    @SerializedName("command")
-    val command: String,
-
-    @SerializedName("description")
-    val description: String,
-
-    @SerializedName("risk_level")
-    val riskLevel: RiskLevel = RiskLevel.MEDIUM,
-
-    @SerializedName("timestamp")
-    val timestamp: Long = System.currentTimeMillis(),
-
-    @SerializedName("timeout_seconds")
-    val timeoutSeconds: Int = 60
-)
-
-enum class RiskLevel {
-    @SerializedName("low")
-    LOW,
-
-    @SerializedName("medium")
-    MEDIUM,
-
-    @SerializedName("high")
-    HIGH,
-
-    @SerializedName("critical")
-    CRITICAL
-}
-
-/**
- * Webhook payload sent from Hermes to the watch.
- */
-data class HermesWebhookPayload(
-    @SerializedName("type")
-    val type: PayloadType,
-
-    @SerializedName("message")
-    val message: HermesMessage? = null,
-
-    @SerializedName("approval")
-    val approval: ApprovalRequest? = null,
-
-    @SerializedName("status")
-    val status: ConnectionStatus? = null
-)
-
-enum class PayloadType {
-    @SerializedName("message")
-    MESSAGE,
-
-    @SerializedName("approval")
-    APPROVAL,
-
-    @SerializedName("status")
-    STATUS
-}
-
+/** Result of the reachability/auth check shown in the status chip. */
 enum class ConnectionStatus {
-    @SerializedName("connected")
+    /** No server URL saved yet. */
+    NOT_CONFIGURED,
+    CHECKING,
     CONNECTED,
 
-    @SerializedName("disconnected")
-    DISCONNECTED,
-
-    @SerializedName("reconnecting")
-    RECONNECTING
+    /** The server answered 401/403: the API key is missing or wrong. */
+    KEY_REJECTED,
+    UNREACHABLE,
 }
 
 /**
- * Request body for the OpenAI Responses API (/v1/responses).
+ * Request body for `POST /v1/responses` on the Hermes gateway.
+ *
+ * [conversation] is a stable name the gateway maps to one agent session, so
+ * consecutive turns share context. Without it every request starts a fresh
+ * session with no memory of earlier turns.
  */
 data class ResponsesApiRequest(
     @SerializedName("model")
     val model: String = "hermes-agent",
 
     @SerializedName("input")
-    val input: String
+    val input: String,
+
+    @SerializedName("conversation")
+    val conversation: String,
 )
 
-/**
- * Response body from the OpenAI Responses API (/v1/responses).
- */
+/** The subset of the `/v1/responses` response body this app reads. */
 data class ResponsesApiResponse(
     @SerializedName("id")
     val id: String? = null,
 
     @SerializedName("output")
-    val output: List<ResponsesOutputItem>? = null
+    val output: List<ResponsesOutputItem>? = null,
 )
 
 /**
- * A single item in a Responses API `output` array — either an assistant
- * message or a function call requiring approval.
+ * One item of the response `output` array. The gateway emits `reasoning`,
+ * `function_call` / `function_call_output` (tool calls it has ALREADY run
+ * server-side, replayed for display only) and a final `message`.
  */
 data class ResponsesOutputItem(
     @SerializedName("type")
-    val type: String,
-
-    @SerializedName("id")
-    val id: String? = null,
+    val type: String? = null,
 
     @SerializedName("content")
     val content: List<ResponsesContentPart>? = null,
 
     @SerializedName("name")
     val name: String? = null,
-
-    @SerializedName("arguments")
-    val arguments: String? = null,
-
-    @SerializedName("call_id")
-    val callId: String? = null
 )
 
 data class ResponsesContentPart(
     @SerializedName("type")
-    val type: String,
+    val type: String? = null,
 
     @SerializedName("text")
-    val text: String? = null
+    val text: String? = null,
 )
-
-enum class ApprovalDecision {
-    @SerializedName("approve")
-    APPROVE,
-
-    @SerializedName("deny")
-    DENY
-}

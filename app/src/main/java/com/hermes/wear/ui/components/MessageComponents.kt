@@ -1,9 +1,14 @@
 package com.hermes.wear.ui.components
 
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -18,70 +23,75 @@ import com.hermes.wear.data.model.Sender
 import com.hermes.wear.ui.theme.HermesColors
 
 /**
- * A single message bubble in the conversation list.
- * User messages are right-aligned with primary color.
- * Hermes messages are left-aligned with surface color.
+ * One conversation entry. User messages are right-aligned in the primary
+ * color, Hermes replies left-aligned on the surface color, and SYSTEM notes
+ * (e.g. "Hermes ran terminal") are small italic read-only lines.
+ *
+ * Drawn as a plain rounded box rather than a disabled Chip: a disabled Chip
+ * dims its content, which made every message hard to read.
  */
 @Composable
 fun MessageBubble(message: HermesMessage) {
-    val isUser = message.sender == Sender.USER
-    val alignment = if (isUser) Alignment.End else Alignment.Start
+    if (message.sender == Sender.SYSTEM) {
+        Text(
+            text = message.text,
+            style = MaterialTheme.typography.caption3,
+            fontStyle = FontStyle.Italic,
+            color = HermesColors.SystemGray,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
+        )
+        return
+    }
 
+    val isUser = message.sender == Sender.USER
     Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = alignment
+        horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
     ) {
-        Chip(
-            onClick = {},
-            label = {
-                Column {
-                    Text(
-                        text = when (message.sender) {
-                            Sender.USER -> "You"
-                            Sender.HERMES -> "Hermes"
-                            Sender.SYSTEM -> "System"
-                        },
-                        style = MaterialTheme.typography.caption3,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isUser) HermesColors.Primary.copy(alpha = 0.7f)
-                                else HermesColors.Secondary
-                    )
-                    Text(
-                        text = message.text,
-                        style = MaterialTheme.typography.body2,
-                        color = if (isUser) HermesColors.OnPrimary
-                                else HermesColors.OnSurface
-                    )
-                }
-            },
-            colors = ChipDefaults.chipColors(
-                backgroundColor = if (isUser) HermesColors.UserBubble
-                                  else if (message.sender == Sender.SYSTEM) HermesColors.SurfaceVariant
-                                  else HermesColors.HermesBubble,
-                contentColor = if (isUser) HermesColors.OnPrimary
-                               else HermesColors.OnSurface
-            ),
+        Column(
             modifier = Modifier
-                .padding(horizontal = 4.dp)
-                .fillMaxWidth(if (isUser) 0.85f else 0.9f),
-            enabled = false
-        )
-
-        // Status indicator for user messages
-        if (isUser && message.status == MessageStatus.ERROR) {
+                .fillMaxWidth(if (isUser) 0.85f else 0.9f)
+                .background(
+                    if (isUser) HermesColors.UserBubble else HermesColors.HermesBubble,
+                    RoundedCornerShape(16.dp)
+                )
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+        ) {
             Text(
-                text = "⚠️ Failed to send",
+                text = if (isUser) "You" else "Hermes",
                 style = MaterialTheme.typography.caption3,
-                color = HermesColors.Error,
-                textAlign = TextAlign.End,
-                modifier = Modifier.padding(end = 8.dp)
+                fontWeight = FontWeight.Bold,
+                color = if (isUser) HermesColors.OnPrimary else HermesColors.Secondary
             )
+            Text(
+                text = message.text,
+                style = MaterialTheme.typography.body2,
+                color = if (isUser) HermesColors.OnPrimary else HermesColors.OnSurface
+            )
+        }
+
+        when {
+            isUser && message.status == MessageStatus.SENDING -> StatusLine("Sending…", HermesColors.SystemGray)
+            isUser && message.status == MessageStatus.ERROR -> StatusLine("Not sent", HermesColors.Error)
         }
     }
 }
 
+@Composable
+private fun StatusLine(text: String, color: androidx.compose.ui.graphics.Color) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.caption3,
+        color = color,
+        textAlign = TextAlign.End,
+        modifier = Modifier.padding(end = 8.dp)
+    )
+}
+
 /**
- * Connection status indicator bar at the top of the conversation screen.
+ * Connection status chip at the top of the conversation screen. Tapping it
+ * re-runs the reachability/auth check unless already connected or checking.
  */
 @Composable
 fun ConnectionStatusIndicator(
@@ -89,13 +99,16 @@ fun ConnectionStatusIndicator(
     onTap: () -> Unit
 ) {
     val (text, color) = when (status) {
-        ConnectionStatus.CONNECTED -> "● Connected" to HermesColors.ApprovalGreen
-        ConnectionStatus.DISCONNECTED -> "○ Tap to connect" to HermesColors.SystemGray
-        ConnectionStatus.RECONNECTING -> "◌ Reconnecting..." to HermesColors.RiskMedium
+        ConnectionStatus.CONNECTED -> "● Connected" to HermesColors.Success
+        ConnectionStatus.CHECKING -> "◌ Checking…" to HermesColors.Warning
+        ConnectionStatus.KEY_REJECTED -> "✕ Key rejected · retry" to HermesColors.Error
+        ConnectionStatus.UNREACHABLE -> "○ Unreachable · retry" to HermesColors.SystemGray
+        ConnectionStatus.NOT_CONFIGURED -> "○ Set server in Settings" to HermesColors.SystemGray
     }
+    val tappable = status != ConnectionStatus.CONNECTED && status != ConnectionStatus.CHECKING
 
     Chip(
-        onClick = { if (status != ConnectionStatus.CONNECTED) onTap() },
+        onClick = { if (tappable) onTap() },
         label = {
             Text(
                 text = text,
@@ -109,7 +122,6 @@ fun ConnectionStatusIndicator(
         ),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 2.dp),
-        enabled = status != ConnectionStatus.CONNECTED
+            .padding(horizontal = 8.dp, vertical = 2.dp)
     )
 }
