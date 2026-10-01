@@ -1,63 +1,73 @@
 # Hermes Wear
 
-A Wear OS companion app for a self-hosted [Hermes Agent](https://github.com/NousResearch/Hermes-Agent): talk to your agent by voice from your wrist, read its replies, and approve or deny tool-call requests. Written for a Pixel Watch (Wear OS 3+, API 30+).
+A Wear OS app for a self-hosted [Hermes Agent](https://github.com/NousResearch/Hermes-Agent) gateway: talk to your agent by voice from your wrist and read its replies. It runs standalone on the watch (no phone app) and was written for a Pixel Watch (Wear OS 3+, API 30+).
 
 ## How it works
 
-The app is **HTTP-only**. It keeps no background connection and runs no service. Everything goes through the Hermes Gateway API Server's OpenAI-compatible Responses endpoint.
+The app uses plain request/response HTTP against the gateway's OpenAI-compatible API server. It keeps no background connection and runs no service.
 
-- **Send:** `POST {server}/v1/responses` with `{"model": "hermes-agent", "input": "<text>"}`, authenticated with `Authorization: Bearer <api key>`.
-- **Replies:** `output` items of type `message` are shown as Hermes messages.
-- **Approvals:** `output` items of type `function_call` open the approval screen. Approve/Deny sends a follow-up `/v1/responses` call whose input is the text `approve <call_id>` or `deny <call_id>`. This text form has not been verified against the gateway; check it before relying on it.
-- **Reachability:** a `HEAD` request to the server root, used for the connection indicator.
-- **Complication:** a short-text watch-face complication that opens the app.
+- **Send:** `POST {server}/v1/responses` with `{"model": "hermes-agent", "input": "<text>", "conversation": "<id>"}` and `Authorization: Bearer <api key>`. One turn at a time: while a turn is in flight the action bar shows a spinner and a **Cancel** button. A turn can take minutes while the agent runs tools, so each call is capped at 5 minutes.
+- **Conversation memory:** `conversation` is a stable id (`hermes-wear-<uuid>`), created once per install and stored in prefs. The gateway maps it to one agent session, so turns share context. **Settings → New conversation** clears the on-watch history and switches to a fresh id.
+- **Replies:** each `message` output item's `output_text` parts are shown as a Hermes reply.
+- **Tool calls:** `function_call` output items are tools the gateway **already ran** on the server; they are replayed in the response for display only. The app shows each one as a small read-only note, "Hermes ran <tool>". There is no approve/deny step in this app, and it does not take part in Hermes' dangerous-command approval flow, which the gateway exposes for streaming runs through `POST /v1/runs/{id}/approval`.
+- **Connection check:** `GET {server}/v1/models` with the same Bearer key. The gateway serves this route only to an authenticated caller, so the status chip can tell **Connected**, **Key rejected** (401/403) and **Unreachable** apart. It runs on launch, after saving the URL or key, and when you tap the chip.
+- **Lifetime:** conversation state lives in memory in an app-wide object. A reply that arrives after you swipe the app away is still recorded and shown on the next launch, as long as the process is alive. Nothing is written to disk except settings.
+- **Complication:** a static short-text "Hermes" watch-face complication that opens the app.
 
 ### Code map (`app/src/main/java/com/hermes/wear/`)
 
 | Path | Role |
 |------|------|
-| `data/network/HermesApiClient.kt` | OkHttp client for `/v1/responses` and the health check |
-| `data/repository/HermesRepository.kt` | Conversation and pending-approval state |
-| `data/repository/PreferenceHelper.kt` | Server URL and API key in SharedPreferences |
-| `data/model/Models.kt` | Message, approval and Responses API types |
-| `ui/` | Compose for Wear OS: `MainActivity`, `HermesViewModel`, conversation / approval / settings screens |
+| `data/network/HermesApiClient.kt` | OkHttp client for `/v1/responses` and `/v1/models`; `ResponsesParser` (response → messages); `ServerUrl.normalize` |
+| `data/repository/HermesRepository.kt` | Conversation, sending and connection state (app-scoped) |
+| `data/repository/PreferenceHelper.kt` | Server URL, API key and conversation id in SharedPreferences |
+| `data/model/Models.kt` | Message and Responses API types |
+| `HermesWearApp.kt` | Owns the repository and its application-level coroutine scope |
+| `ui/` | Compose for Wear OS: `MainActivity`, `HermesViewModel`, conversation and settings screens |
 | `complication/HermesComplicationService.kt` | Complication data source |
 
 ## Configuration
 
-There are no usable defaults: no server URL or API key is committed to source.
+Nothing is committed to source: there is no default server URL or API key.
 
-- **Server URL:** on the watch, open Settings and tap the URL chip. It cycles through a small list of local/LAN presets defined in `ui/screens/SettingsScreen.kt`; edit that list for your own gateway. Cleartext HTTP is allowed (`res/xml/network_security_config.xml`) because the gateway is expected to be on a trusted network.
-- **API key:** on the watch, open Settings, tap the *API Key* chip, type the key into the masked field and tap *Save key* (*Clear key* removes it). It is stored in the `api_key` SharedPreferences entry (plaintext app-private storage), is applied to the running client immediately, and is never displayed or logged; the chip only shows whether a key is set. The entry UI is a plain masked text field and has not been tested on a physical watch.
+- **Server URL:** on the watch, open Settings (⚙️), tap the URL chip, type the server root with the watch keyboard and tap **Save URL**. Example: `https://hermes.example.com`, or `http://<host>:<port>` for local testing, where the port is the gateway API server's port (`platforms.api_server.port` in the gateway config, e.g. `8080`). A trailing `/` or a pasted `/v1/responses` is stripped.
+- **HTTPS is required** except for local development hosts. `res/xml/network_security_config.xml` blocks plain `http://` everywhere except `localhost`/`127.0.0.1` (e.g. with `adb reverse tcp:8080 tcp:8080`) and `10.0.2.2` (the emulator's host), because the API key travels as a Bearer token. The intended setup is an HTTPS URL, e.g. a Cloudflare tunnel in front of the gateway. If you must use a LAN address over `http://`, add that exact host to the `domain-config` in that file and rebuild; Android can't allow an IP range. Settings shows a warning when the URL entered would be blocked.
+- **API key:** in Settings, tap the *API Key* chip, type the key into the masked field and tap **Save key** (**Clear key** removes it). It is applied immediately, never displayed or logged; the chip only shows whether a key is set.
+- **Storage:** both are stored in plaintext in the app-private `hermes_wear_prefs` SharedPreferences file. `allowBackup="false"` keeps it out of backups, but root, or `run-as` on a debug build, can read it. Encrypting it (e.g. `androidx.security` EncryptedSharedPreferences) is a possible follow-up.
 
-  Typing a long random key on a watch keyboard is awkward and easy to get wrong. On a **debug build only** (package `com.hermes.wear.debug`; `run-as` refuses release builds) you can provision the key from a computer with `adb` instead. This writes the whole `hermes_wear_prefs.xml` file, so it must also set `server_url` (the base URL, without `/v1/responses`); XML-escape any `&`, `<` or `>` in the key. Force-stop the app first so it doesn't overwrite the file from its cached copy, then relaunch it:
+### Provisioning from a computer (debug builds only)
 
-  ```bash
-  cat > /tmp/hermes_wear_prefs.xml <<'EOF'
-  <?xml version='1.0' encoding='utf-8' standalone='yes' ?>
-  <map>
-      <string name="server_url">http://HOST:8642</string>
-      <string name="api_key">YOUR_API_KEY</string>
-  </map>
-  EOF
-  adb push /tmp/hermes_wear_prefs.xml /data/local/tmp/hermes_wear_prefs.xml
-  adb shell am force-stop com.hermes.wear.debug
-  adb shell "run-as com.hermes.wear.debug sh -c 'mkdir -p shared_prefs && cp /data/local/tmp/hermes_wear_prefs.xml shared_prefs/hermes_wear_prefs.xml'"
-  adb shell rm /data/local/tmp/hermes_wear_prefs.xml
-  rm /tmp/hermes_wear_prefs.xml
-  ```
-
-  The file name and the `server_url` / `api_key` entry names come from `PreferenceHelper.kt`. This procedure has been checked against the code and dry-run for shell quoting and XML well-formedness, but not on a physical watch.
-
-## Build
-
-Requirements: JDK 17, Android SDK 34 (the Gradle wrapper is 8.7). Clone the repo and run:
+Typing a long key on a watch keyboard is awkward. On a **debug build** (package `com.hermes.wear.debug`; `run-as` refuses release builds) you can write the prefs file over `adb`. This replaces the whole file, so set `server_url` (the server root, without `/v1/responses`) as well as `api_key`. Leave out `conversation_id` and the app creates one. XML-escape any `&`, `<` or `>` in the key. Force-stop the app first so it doesn't overwrite the file from its in-memory copy, then relaunch:
 
 ```bash
+cat > /tmp/hermes_wear_prefs.xml <<'EOF'
+<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
+<map>
+    <string name="server_url">https://hermes.example.com</string>
+    <string name="api_key">YOUR_API_KEY</string>
+</map>
+EOF
+adb push /tmp/hermes_wear_prefs.xml /data/local/tmp/hermes_wear_prefs.xml
+adb shell am force-stop com.hermes.wear.debug
+adb shell "run-as com.hermes.wear.debug sh -c 'mkdir -p shared_prefs && cp /data/local/tmp/hermes_wear_prefs.xml shared_prefs/hermes_wear_prefs.xml'"
+adb shell rm /data/local/tmp/hermes_wear_prefs.xml
+rm /tmp/hermes_wear_prefs.xml
+```
+
+The file name and entry names (`server_url`, `api_key`, `conversation_id`) come from `PreferenceHelper.kt`.
+
+## Build and test
+
+Requirements: JDK 17, Android SDK 34 (the Gradle wrapper is 8.7). Then:
+
+```bash
+./gradlew testDebugUnitTest   # JVM unit tests; the gateway is faked with an OkHttp interceptor
 ./gradlew assembleDebug
 ```
 
 The debug APK lands in `app/build/outputs/apk/debug/app-debug.apk` (application id `com.hermes.wear.debug`). `./gradlew assembleRelease` needs a signing config of your own; keystores are gitignored.
+
+The unit tests cover the request body, response parsing, HTTP/JSON/network failures, the connection check, conversation-id reuse and rotation, the one-turn-at-a-time guard and cancellation. The Compose UI has no tests, and the app has not been exercised against a live gateway since the conversation and tool-note changes.
 
 ## Install on a watch
 
@@ -71,9 +81,7 @@ adb shell am start -n com.hermes.wear.debug/com.hermes.wear.ui.MainActivity
 
 ## Permissions
 
-`INTERNET`, `RECORD_AUDIO` and `VIBRATE` are declared in the manifest. Voice input uses the system speech recognizer (`RecognizerIntent`).
-
-Note: `app/src/main/res/xml/wear.xml` declares `com.google.android.wearable.standalone`, but nothing references it (the manifest has no such meta-data), so the app is not currently marked as standalone.
+Only `INTERNET`. Voice input uses the system speech recognizer (`RecognizerIntent`), which records audio under its own permission, so this app does not request `RECORD_AUDIO`. The app is marked standalone (`com.google.android.wearable.standalone` in the manifest) and needs no phone app.
 
 ## License
 
