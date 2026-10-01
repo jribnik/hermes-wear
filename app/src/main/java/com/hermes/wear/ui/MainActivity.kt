@@ -42,27 +42,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        handleIntent(intent)
-
         setContent {
             MaterialTheme(colors = WearHermesColors) {
                 HermesWearApp()
             }
-        }
-    }
-
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        handleIntent(intent)
-    }
-
-    private fun handleIntent(intent: Intent) {
-        val messageText = intent.getStringExtra("EXTRA_MESSAGE_TEXT")
-        if (!messageText.isNullOrBlank()) {
-            lifecycleScope.launch {
-                viewModel.sendMessage(messageText)
-            }
-            intent.removeExtra("EXTRA_MESSAGE_TEXT")
         }
     }
 
