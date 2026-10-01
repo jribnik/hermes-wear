@@ -45,6 +45,14 @@ class ResponsesParserTest {
         )
     }
 
+    @Test
+    fun `null elements in output or content are skipped instead of crashing`() {
+        val messages = ResponsesParser.parse(
+            """{"output":[null,{"type":"message","content":[null,{"type":"output_text","text":"ok"}]},null]}"""
+        )
+        assertEquals("ok", messages.single().text)
+    }
+
     @Test(expected = JsonParseException::class)
     fun `non-JSON body throws JsonParseException`() {
         ResponsesParser.parse("not json at all {")

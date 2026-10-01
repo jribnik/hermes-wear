@@ -73,7 +73,7 @@ fun MessageBubble(message: HermesMessage) {
 
         when {
             isUser && message.status == MessageStatus.SENDING -> StatusLine("Sending…", HermesColors.SystemGray)
-            isUser && message.status == MessageStatus.ERROR -> StatusLine("Not sent", HermesColors.Error)
+            isUser && message.status == MessageStatus.ERROR -> StatusLine("No reply", HermesColors.Error)
         }
     }
 }

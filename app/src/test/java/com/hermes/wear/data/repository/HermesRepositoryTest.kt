@@ -115,8 +115,63 @@ class HermesRepositoryTest {
         job.join()
 
         assertEquals(MessageStatus.ERROR, repo.messages.value.single().status)
-        assertEquals("Cancelled", repo.error.value)
+        assertEquals("Stopped waiting. Hermes may still finish this turn.", repo.error.value)
         assertFalse(repo.isSending.value)
+    }
+
+    @Test
+    fun `starting a new conversation during a send leaves no stale error or reply behind`() = runBlocking {
+        val started = CountDownLatch(1)
+        val server = FakeServer(respond = {
+            started.countDown()
+            Thread.sleep(1_000)
+            200 to """{"output":[{"type":"message","content":[{"type":"output_text","text":"late"}]}]}"""
+        })
+        val repo = HermesRepository(HermesApiClient(server.client), FakeSettings(), scope)
+
+        val job = repo.sendMessage("hello")!!
+        started.await(5, TimeUnit.SECONDS)
+        repo.startNewConversation()
+        job.join()
+
+        assertEquals(emptyList<Any>(), repo.messages.value)
+        assertNull(repo.error.value)
+        assertFalse(repo.isSending.value)
+    }
+
+    @Test
+    fun `a 2xx reply with no message and no tool calls is reported, not silent`() = runBlocking {
+        val server = FakeServer(respond = { 200 to """{"output":[{"type":"reasoning"}]}""" })
+        val repo = HermesRepository(HermesApiClient(server.client), FakeSettings(), scope)
+
+        repo.sendMessage("hello")!!.join()
+
+        assertEquals("Empty reply from Hermes", repo.error.value)
+        assertEquals(MessageStatus.SENT, repo.messages.value.single().status)
+    }
+
+    @Test
+    fun `a slower stale connection check cannot overwrite a newer one`() = runBlocking {
+        val firstStarted = CountDownLatch(1)
+        val calls = java.util.concurrent.atomic.AtomicInteger()
+        val server = FakeServer(respond = {
+            if (calls.incrementAndGet() == 1) {
+                firstStarted.countDown()
+                Thread.sleep(1_000)
+                500 to "" // stale: would map to UNREACHABLE
+            } else {
+                200 to """{"data":[]}"""
+            }
+        })
+        val repo = HermesRepository(HermesApiClient(server.client), FakeSettings(), scope)
+
+        val first = repo.checkConnection()
+        firstStarted.await(5, TimeUnit.SECONDS)
+        val second = repo.checkConnection()
+        first.join()
+        second.join()
+
+        assertEquals(ConnectionStatus.CONNECTED, repo.connectionStatus.value)
     }
 
     @Test

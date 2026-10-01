@@ -1,5 +1,6 @@
 package com.hermes.wear.data.repository
 
+import com.google.gson.JsonParseException
 import com.hermes.wear.data.model.ConnectionStatus
 import com.hermes.wear.data.model.HermesMessage
 import com.hermes.wear.data.model.MessageStatus
@@ -27,6 +28,13 @@ import java.io.IOException
  *
  * One turn at a time: [sendMessage] ignores new text while a send is in
  * flight, which also absorbs double taps.
+ *
+ * Cancelling a send (or hitting the 5-minute timeout) only abandons the
+ * request on the watch. The gateway keeps running the turn and records it
+ * under the conversation, so the agent may still act on it and will remember
+ * it; the watch just never shows the reply. A message left in
+ * [MessageStatus.ERROR] therefore means "no reply received", not "not
+ * delivered".
  */
 class HermesRepository(
     private val apiClient: HermesApiClient,
@@ -53,6 +61,7 @@ class HermesRepository(
     val error: StateFlow<String?> = _error.asStateFlow()
 
     private var sendJob: Job? = null
+    private var checkJob: Job? = null
 
     private fun config() = ServerConfig(settings.serverUrl, settings.apiKey)
 
@@ -75,20 +84,28 @@ class HermesRepository(
         val conversation = settings.conversationId
 
         return scope.launch {
+            // True once "New conversation" has replaced this turn's conversation:
+            // the history it belonged to was cleared, so nothing of it may be
+            // written back (not a late reply, and not the cancel error).
+            fun superseded() = settings.conversationId != conversation
             try {
                 val result = apiClient.send(config(), conversation, trimmed)
+                if (superseded()) return@launch
                 result.onSuccess { replies ->
                     setStatus(userMessage.id, MessageStatus.SENT)
                     _messages.update { it + replies }
                     _connectionStatus.value = ConnectionStatus.CONNECTED
+                    if (replies.isEmpty()) _error.value = "Empty reply from Hermes"
                 }.onFailure { e ->
                     setStatus(userMessage.id, MessageStatus.ERROR)
-                    _error.value = "Failed: ${e.message ?: e.javaClass.simpleName}"
+                    _error.value = failureText(e)
                     _connectionStatus.value = statusFor(e) ?: _connectionStatus.value
                 }
             } catch (e: CancellationException) {
-                setStatus(userMessage.id, MessageStatus.ERROR)
-                _error.value = "Cancelled"
+                if (!superseded()) {
+                    setStatus(userMessage.id, MessageStatus.ERROR)
+                    _error.value = "Stopped waiting. Hermes may still finish this turn."
+                }
                 throw e
             } finally {
                 _isSending.value = false
@@ -101,14 +118,21 @@ class HermesRepository(
         sendJob?.cancel()
     }
 
-    /** Re-runs the reachability/auth check. */
-    fun checkConnection(): Job = scope.launch {
-        if (settings.serverUrl.isBlank()) {
-            _connectionStatus.value = ConnectionStatus.NOT_CONFIGURED
-            return@launch
-        }
-        _connectionStatus.value = ConnectionStatus.CHECKING
-        _connectionStatus.value = apiClient.checkHealth(config())
+    /**
+     * Re-runs the reachability/auth check. A check still running is cancelled
+     * first, so a slow stale result (e.g. for the previous URL) can never
+     * overwrite a newer one.
+     */
+    fun checkConnection(): Job {
+        checkJob?.cancel()
+        return scope.launch {
+            if (settings.serverUrl.isBlank()) {
+                _connectionStatus.value = ConnectionStatus.NOT_CONFIGURED
+                return@launch
+            }
+            _connectionStatus.value = ConnectionStatus.CHECKING
+            _connectionStatus.value = apiClient.checkHealth(config())
+        }.also { checkJob = it }
     }
 
     /**
@@ -128,6 +152,13 @@ class HermesRepository(
 
     private fun setStatus(id: String, status: MessageStatus) {
         _messages.update { list -> list.map { if (it.id == id) it.copy(status = status) else it } }
+    }
+
+    private fun failureText(e: Throwable): String = when (e) {
+        // Includes OkHttp's call timeout. The gateway may still be running the turn.
+        is java.io.InterruptedIOException -> "Timed out waiting for Hermes. It may still finish this turn."
+        is JsonParseException -> "Unreadable reply from Hermes"
+        else -> "Failed: ${e.message ?: e.javaClass.simpleName}"
     }
 
     private fun statusFor(e: Throwable): ConnectionStatus? = when {

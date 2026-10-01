@@ -68,14 +68,16 @@ object ResponsesParser {
         } ?: throw JsonParseException("Empty response from server")
 
         val out = mutableListOf<HermesMessage>()
-        response.output.orEmpty().forEach { item ->
+        // Gson leaves JSON nulls inside lists as nulls despite the non-null
+        // element type, so drop them rather than NPE on a malformed item.
+        response.output.orEmpty().filterNotNull().forEach { item ->
             when (item.type) {
                 "function_call" -> {
                     val name = item.name?.takeIf { it.isNotBlank() } ?: "a tool"
                     out += HermesMessage(text = "Hermes ran $name", sender = Sender.SYSTEM)
                 }
                 "message" -> {
-                    val text = item.content.orEmpty()
+                    val text = item.content.orEmpty().filterNotNull()
                         .filter { it.type == "output_text" }
                         .mapNotNull { it.text?.takeIf { t -> t.isNotBlank() } }
                         .joinToString("\n\n")
