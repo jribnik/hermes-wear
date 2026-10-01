@@ -151,6 +151,53 @@ class HermesRepositoryTest {
     }
 
     @Test
+    fun `a reply with only tool notes shows a note, not an error`() = runBlocking {
+        val server = FakeServer(respond = { 200 to """{"output":[{"type":"function_call","name":"terminal"}]}""" })
+        val repo = HermesRepository(HermesApiClient(server.client), FakeSettings(), scope)
+
+        repo.sendMessage("hello")!!.join()
+
+        assertNull(repo.error.value)
+        assertEquals(
+            listOf("hello", "Hermes ran terminal", "Hermes ran tools but sent no message"),
+            repo.messages.value.map { it.text },
+        )
+        assertEquals(Sender.SYSTEM, repo.messages.value.last().sender)
+        assertEquals(MessageStatus.SENT, repo.messages.value.first().status)
+    }
+
+    @Test
+    fun `a read timeout says Hermes may still finish the turn`() = runBlocking {
+        val server = FakeServer(respond = { throw java.net.SocketTimeoutException("timeout") })
+        val repo = HermesRepository(HermesApiClient(server.client), FakeSettings(), scope)
+
+        repo.sendMessage("hello")!!.join()
+
+        assertEquals("Timed out waiting for Hermes. It may still finish this turn.", repo.error.value)
+    }
+
+    @Test
+    fun `a call timeout says Hermes may still finish the turn`() = runBlocking {
+        val server = FakeServer(respond = { throw java.io.InterruptedIOException("timeout") })
+        val repo = HermesRepository(HermesApiClient(server.client), FakeSettings(), scope)
+
+        repo.sendMessage("hello")!!.join()
+
+        assertEquals("Timed out waiting for Hermes. It may still finish this turn.", repo.error.value)
+    }
+
+    @Test
+    fun `a connect timeout says it never reached Hermes`() = runBlocking {
+        val server = FakeServer(respond = { throw java.net.SocketTimeoutException("connect timed out") })
+        val repo = HermesRepository(HermesApiClient(server.client), FakeSettings(), scope)
+
+        repo.sendMessage("hello")!!.join()
+
+        assertEquals("Couldn't reach Hermes (connect timed out)", repo.error.value)
+        assertEquals(MessageStatus.ERROR, repo.messages.value.single().status)
+    }
+
+    @Test
     fun `a slower stale connection check cannot overwrite a newer one`() = runBlocking {
         val firstStarted = CountDownLatch(1)
         val calls = java.util.concurrent.atomic.AtomicInteger()

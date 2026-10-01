@@ -60,6 +60,9 @@ class HermesRepository(
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
+    /** Makes "is this turn still current?" + the write that follows atomic against [startNewConversation]. */
+    private val stateLock = Any()
+
     private var sendJob: Job? = null
     private var checkJob: Job? = null
 
@@ -84,25 +87,39 @@ class HermesRepository(
         val conversation = settings.conversationId
 
         return scope.launch {
-            // True once "New conversation" has replaced this turn's conversation:
-            // the history it belonged to was cleared, so nothing of it may be
-            // written back (not a late reply, and not the cancel error).
-            fun superseded() = settings.conversationId != conversation
+            // "New conversation" replaces this turn's conversation: the history
+            // it belonged to was cleared, so nothing of it may be written back
+            // (not a late reply, and not the cancel error). The check and the
+            // write happen together under [stateLock], and
+            // [startNewConversation] rotates and clears under the same lock,
+            // so a tap can't slip in between the check and the write.
+            fun ifCurrent(block: () -> Unit) {
+                synchronized(stateLock) {
+                    if (settings.conversationId == conversation) block()
+                }
+            }
             try {
                 val result = apiClient.send(config(), conversation, trimmed)
-                if (superseded()) return@launch
-                result.onSuccess { replies ->
-                    setStatus(userMessage.id, MessageStatus.SENT)
-                    _messages.update { it + replies }
-                    _connectionStatus.value = ConnectionStatus.CONNECTED
-                    if (replies.isEmpty()) _error.value = "Empty reply from Hermes"
-                }.onFailure { e ->
-                    setStatus(userMessage.id, MessageStatus.ERROR)
-                    _error.value = failureText(e)
-                    _connectionStatus.value = statusFor(e) ?: _connectionStatus.value
+                ifCurrent {
+                    result.onSuccess { replies ->
+                        setStatus(userMessage.id, MessageStatus.SENT)
+                        _messages.update { it + replies }
+                        _connectionStatus.value = ConnectionStatus.CONNECTED
+                        when {
+                            replies.isEmpty() -> _error.value = "Empty reply from Hermes"
+                            // Tool notes only: the turn did something, so this is
+                            // shown as a note in the conversation, not as an error.
+                            replies.none { it.sender == Sender.HERMES } ->
+                                _messages.update { it + HermesMessage(text = NO_MESSAGE_NOTE, sender = Sender.SYSTEM) }
+                        }
+                    }.onFailure { e ->
+                        setStatus(userMessage.id, MessageStatus.ERROR)
+                        _error.value = failureText(e)
+                        _connectionStatus.value = statusFor(e) ?: _connectionStatus.value
+                    }
                 }
             } catch (e: CancellationException) {
-                if (!superseded()) {
+                ifCurrent {
                     setStatus(userMessage.id, MessageStatus.ERROR)
                     _error.value = "Stopped waiting. Hermes may still finish this turn."
                 }
@@ -141,9 +158,11 @@ class HermesRepository(
      */
     fun startNewConversation() {
         cancelSend()
-        settings.rotateConversationId()
-        _messages.value = emptyList()
-        _error.value = null
+        synchronized(stateLock) {
+            settings.rotateConversationId()
+            _messages.value = emptyList()
+            _error.value = null
+        }
     }
 
     fun clearError() {
@@ -154,10 +173,16 @@ class HermesRepository(
         _messages.update { list -> list.map { if (it.id == id) it.copy(status = status) else it } }
     }
 
-    private fun failureText(e: Throwable): String = when (e) {
-        // Includes OkHttp's call timeout. The gateway may still be running the turn.
-        is java.io.InterruptedIOException -> "Timed out waiting for Hermes. It may still finish this turn."
-        is JsonParseException -> "Unreadable reply from Hermes"
+    // OkHttp's connect timeout is a SocketTimeoutException, itself an
+    // InterruptedIOException, but the request never reached the gateway then,
+    // so "it may still finish" would be wrong. OkHttp has no dedicated type for
+    // it; it is recognised by the socket layer's "connect timed out" message.
+    internal fun failureText(e: Throwable): String = when {
+        e is java.net.SocketTimeoutException && e.message?.contains("connect", ignoreCase = true) == true ->
+            "Couldn't reach Hermes (connect timed out)"
+        // Read/call timeouts: the gateway may still be running the turn.
+        e is java.io.InterruptedIOException -> "Timed out waiting for Hermes. It may still finish this turn."
+        e is JsonParseException -> "Unreadable reply from Hermes"
         else -> "Failed: ${e.message ?: e.javaClass.simpleName}"
     }
 
@@ -166,5 +191,9 @@ class HermesRepository(
         e is HermesHttpException -> null // server answered; reachability unchanged
         e is IOException -> ConnectionStatus.UNREACHABLE
         else -> null
+    }
+
+    private companion object {
+        const val NO_MESSAGE_NOTE = "Hermes ran tools but sent no message"
     }
 }
