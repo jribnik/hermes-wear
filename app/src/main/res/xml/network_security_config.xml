@@ -1,10 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  HTTPS everywhere by default: the app sends the gateway API key as a Bearer
+  token, and over plain http:// anyone on the network can read it.
+
+  Cleartext is allowed only for local development hosts:
+    - localhost / 127.0.0.1 (e.g. an `adb reverse tcp:8080 tcp:8080` port forward)
+    - 10.0.2.2 (the host machine, as seen from the Android emulator)
+
+  To use a LAN gateway over plain http:// anyway, add its exact host to the
+  domain-config below, e.g. <domain includeSubdomains="false">192.168.1.20</domain>,
+  and rebuild. Android cannot whitelist an IP range, only exact hosts or
+  domain suffixes. The recommended setup is an HTTPS URL, e.g. a Cloudflare tunnel.
+-->
 <network-security-config>
-    <!-- Allow cleartext for all hosts — this is a personal Wear OS app
-         connecting to a local self-hosted Hermes Gateway over HTTP. -->
-    <base-config cleartextTrafficPermitted="true">
+    <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
     </base-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
 </network-security-config>

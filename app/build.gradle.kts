@@ -65,10 +65,10 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
 
-    // Wear Tiles & Complications
+    // Complication data source
     implementation("androidx.wear.watchface:watchface-complications-data-source-ktx:1.2.1")
 
-    // Networking - OkHttp
+    // Networking - OkHttp (logging-interceptor: debug builds log request line + status only)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
 
@@ -83,4 +83,7 @@ dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
+
+    // JVM unit tests (no MockWebServer: tests fake the network with an OkHttp interceptor)
+    testImplementation("junit:junit:4.13.2")
 }

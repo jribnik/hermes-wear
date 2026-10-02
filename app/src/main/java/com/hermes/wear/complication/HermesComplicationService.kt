@@ -7,6 +7,10 @@ import androidx.wear.watchface.complications.datasource.ComplicationDataSourceSe
 import androidx.wear.watchface.complications.datasource.ComplicationRequest
 import com.hermes.wear.ui.MainActivity
 
+/**
+ * Short-text watch-face complication showing "Hermes"; tapping it opens the
+ * app. The data never changes, so the manifest sets no periodic updates.
+ */
 class HermesComplicationService : ComplicationDataSourceService() {
 
     override fun onComplicationActivated(

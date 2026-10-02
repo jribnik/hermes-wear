@@ -1,182 +1,217 @@
 package com.hermes.wear.data.network
 
 import com.google.gson.Gson
+import com.google.gson.JsonParseException
 import com.hermes.wear.BuildConfig
-import com.hermes.wear.data.model.*
-import kotlinx.coroutines.*
-import kotlinx.coroutines.channels.Channel
-import okhttp3.*
+import com.hermes.wear.data.model.ConnectionStatus
+import com.hermes.wear.data.model.HermesMessage
+import com.hermes.wear.data.model.ResponsesApiRequest
+import com.hermes.wear.data.model.ResponsesApiResponse
+import com.hermes.wear.data.model.Sender
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import okhttp3.logging.HttpLoggingInterceptor
 import java.io.IOException
+import java.net.UnknownServiceException
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+
+/** Where to reach the gateway. [baseUrl] is the server root, e.g. `https://hermes.example.com`. */
+data class ServerConfig(val baseUrl: String, val apiKey: String)
+
+/** The server answered with a non-2xx status. */
+class HermesHttpException(val code: Int, message: String) : IOException(message)
+
+/** Server URL helpers. */
+object ServerUrl {
+    /**
+     * Trims whitespace and trailing slashes, and strips a pasted `/v1/responses`
+     * or `/v1` suffix, so "https://host:8080/v1/responses/" becomes
+     * "https://host:8080". Returns "" for blank input.
+     */
+    fun normalize(raw: String): String {
+        var url = raw.trim().trimEnd('/')
+        for (suffix in listOf("/v1/responses", "/v1")) {
+            if (url.endsWith(suffix, ignoreCase = true)) url = url.dropLast(suffix.length).trimEnd('/')
+        }
+        return url
+    }
+}
 
 /**
- * HTTP client for the Hermes Gateway's OpenAI-compatible /v1/responses API.
+ * Parses a `/v1/responses` body into conversation entries, in order:
+ * - each `function_call` item becomes a read-only [Sender.SYSTEM] note
+ *   "Hermes ran <name>". The gateway has already executed these tools by the
+ *   time the response arrives; they are not requests for approval.
+ * - each `message` item's `output_text` parts become one [Sender.HERMES] reply.
+ * `reasoning` and `function_call_output` items are ignored.
+ *
+ * @throws JsonParseException if [body] is not a JSON object.
+ */
+object ResponsesParser {
+    private val gson = Gson()
+
+    fun parse(body: String): List<HermesMessage> {
+        val response = try {
+            gson.fromJson(body, ResponsesApiResponse::class.java)
+        } catch (e: RuntimeException) {
+            throw JsonParseException("Unreadable response from server", e)
+        } ?: throw JsonParseException("Empty response from server")
+
+        val out = mutableListOf<HermesMessage>()
+        // Gson leaves JSON nulls inside lists as nulls despite the non-null
+        // element type, so drop them rather than NPE on a malformed item.
+        response.output.orEmpty().filterNotNull().forEach { item ->
+            when (item.type) {
+                "function_call" -> {
+                    val name = item.name?.takeIf { it.isNotBlank() } ?: "a tool"
+                    out += HermesMessage(text = "Hermes ran $name", sender = Sender.SYSTEM)
+                }
+                "message" -> {
+                    val text = item.content.orEmpty().filterNotNull()
+                        .filter { it.type == "output_text" }
+                        .mapNotNull { it.text?.takeIf { t -> t.isNotBlank() } }
+                        .joinToString("\n\n")
+                    if (text.isNotBlank()) out += HermesMessage(text = text, sender = Sender.HERMES)
+                }
+            }
+        }
+        return out
+    }
+}
+
+/**
+ * HTTP client for the Hermes gateway's OpenAI-compatible API.
+ *
+ * Calls are enqueued and suspend until done; cancelling the calling coroutine
+ * cancels the HTTP call. A turn can take minutes (the agent may run tools), so
+ * the whole call is bounded by a 5-minute call timeout instead of an
+ * unbounded read.
  */
 class HermesApiClient(
-    baseUrl: String,
-    apiKey: String
+    baseClient: OkHttpClient = OkHttpClient(),
 ) {
-    @Volatile var baseUrl: String = baseUrl
-    @Volatile var apiKey: String = apiKey
     private val gson = Gson()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
-    // Never log request/response bodies in release builds — they contain the
-    // Bearer token and conversation content.
-    private val loggingInterceptor = HttpLoggingInterceptor().apply {
-        level = if (BuildConfig.DEBUG) {
-            HttpLoggingInterceptor.Level.BODY
-        } else {
-            HttpLoggingInterceptor.Level.NONE
-        }
-        redactHeader("Authorization")
-    }
-
-    private val client = OkHttpClient.Builder()
+    private val client: OkHttpClient = baseClient.newBuilder()
         .connectTimeout(15, TimeUnit.SECONDS)
-        // No read timeout: an agent turn can take a long time to answer. The ping
-        // interval keeps HTTP/2 connections alive and surfaces dead ones (e.g. behind
-        // an HTTPS proxy) instead of leaving a call hanging forever.
-        .readTimeout(0, TimeUnit.MILLISECONDS)
         .writeTimeout(15, TimeUnit.SECONDS)
-        .pingInterval(30, TimeUnit.SECONDS)
-        .addInterceptor(loggingInterceptor)
-        .addInterceptor { chain ->
-            chain.proceed(chain.request().newBuilder()
-                .addHeader("ngrok-skip-browser-warning", "true")
-                .build())
+        .readTimeout(5, TimeUnit.MINUTES)
+        .callTimeout(5, TimeUnit.MINUTES)
+        .apply {
+            // Debug builds log the request line and status only, never bodies
+            // (conversation content) or the Authorization header.
+            if (BuildConfig.DEBUG) {
+                addInterceptor(HttpLoggingInterceptor().apply {
+                    level = HttpLoggingInterceptor.Level.BASIC
+                    redactHeader("Authorization")
+                })
+            }
         }
         .build()
 
-    private val incomingMessages = Channel<HermesWebhookPayload>(Channel.BUFFERED)
+    private val healthClient: OkHttpClient = client.newBuilder()
+        .readTimeout(10, TimeUnit.SECONDS)
+        .callTimeout(15, TimeUnit.SECONDS)
+        .build()
 
-    /**
-     * Returns a channel of incoming messages posted by [postToResponsesApi].
-     */
-    fun observeMessages(): Channel<HermesWebhookPayload> = incomingMessages
-
-    /**
-     * Lightweight reachability check — issues a HEAD request against the
-     * server root without posting anything to the conversation. Any HTTP
-     * response (even an error status) means the server is reachable.
-     */
-    suspend fun checkHealth(): Result<Unit> = withContext(Dispatchers.IO) {
-        try {
-            val request = Request.Builder()
-                .url(baseUrl)
-                .head()
-                .addHeader("Authorization", "Bearer $apiKey")
-                .addHeader("X-Client-Type", "wear_os")
-                .addHeader("X-Client-ID", "pixel_watch_4")
-                .build()
-            // The shared client has no read timeout (long-lived connections);
-            // bound the health check so it can't hang indefinitely.
-            val healthClient = client.newBuilder()
-                .readTimeout(10, TimeUnit.SECONDS)
-                .build()
-            healthClient.newCall(request).execute().use { }
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+    /** Builds the `POST {baseUrl}/v1/responses` request. Exposed for tests. */
+    fun buildResponsesRequest(config: ServerConfig, conversation: String, text: String): Request {
+        val json = gson.toJson(ResponsesApiRequest(input = text, conversation = conversation))
+        return Request.Builder()
+            .url("${ServerUrl.normalize(config.baseUrl)}/v1/responses")
+            .post(json.toRequestBody(jsonMediaType))
+            .addHeader("Authorization", "Bearer ${config.apiKey}")
+            .build()
     }
 
     /**
-     * Send a text message to Hermes via the OpenAI Responses API and relay
-     * any assistant reply / function-call approvals through the shared
-     * incoming-messages channel.
+     * Sends one user turn and returns the resulting conversation entries (see
+     * [ResponsesParser]). Failures are returned as [Result.failure]: a
+     * [HermesHttpException] for non-2xx statuses, an [IOException] for network
+     * problems, a [JsonParseException] for an unreadable body.
      */
-    suspend fun sendMessage(text: String): Result<HermesMessage> = withContext(Dispatchers.IO) {
-        postToResponsesApi(text)
-    }
-
-    /**
-     * Approve an approval request. The Responses API has no inline
-     * approve/deny endpoint, so the decision is sent as a follow-up
-     * /v1/responses call whose input carries the decision as text.
-     */
-    suspend fun approveRequest(approvalId: String): Result<Unit> = withContext(Dispatchers.IO) {
-        sendApprovalDecision(approvalId, ApprovalDecision.APPROVE)
-    }
-
-    /**
-     * Deny an approval request (see [approveRequest]).
-     */
-    suspend fun denyRequest(approvalId: String): Result<Unit> = withContext(Dispatchers.IO) {
-        sendApprovalDecision(approvalId, ApprovalDecision.DENY)
-    }
-
-    private suspend fun sendApprovalDecision(
-        approvalId: String,
-        decision: ApprovalDecision
-    ): Result<Unit> = withContext(Dispatchers.IO) {
-        val decisionText = if (decision == ApprovalDecision.APPROVE) "approve" else "deny"
-        postToResponsesApi("$decisionText $approvalId").map { }
-    }
-
-    /**
-     * POST {"model": "hermes-agent", "input": text} to /v1/responses and
-     * relay the parsed output — assistant messages and function-call
-     * approvals both surface via [incomingMessages], since neither has a
-     * dedicated endpoint under the Responses API.
-     */
-    private fun postToResponsesApi(text: String): Result<HermesMessage> {
-        return try {
-            val requestBody = ResponsesApiRequest(input = text)
-            val json = gson.toJson(requestBody)
-            val body = json.toRequestBody(jsonMediaType)
-
-            val request = Request.Builder()
-                .url("$baseUrl/v1/responses")
-                .post(body)
-                .addHeader("Authorization", "Bearer $apiKey")
-                .addHeader("X-Client-Type", "wear_os")
-                .addHeader("X-Client-ID", "pixel_watch_4")
-                .build()
-
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) {
-                return Result.failure(IOException("HTTP ${response.code}: ${response.message}"))
-            }
-
-            val responseBody = response.body?.string() ?: "{}"
-            val apiResponse = gson.fromJson(responseBody, ResponsesApiResponse::class.java)
-
-            var replyMessage: HermesMessage? = null
-            apiResponse.output?.forEach { item ->
-                when (item.type) {
-                    "message" -> {
-                        val replyText = item.content
-                            ?.filter { it.type == "output_text" }
-                            ?.mapNotNull { it.text }
-                            ?.joinToString("\n\n")
-                        if (!replyText.isNullOrBlank()) {
-                            val message = HermesMessage(text = replyText, sender = Sender.HERMES)
-                            replyMessage = message
-                            incomingMessages.trySend(
-                                HermesWebhookPayload(type = PayloadType.MESSAGE, message = message)
-                            )
-                        }
-                    }
-                    "function_call" -> {
-                        val approval = ApprovalRequest(
-                            id = item.callId ?: item.id ?: java.util.UUID.randomUUID().toString(),
-                            command = item.arguments ?: "",
-                            description = item.name ?: "Approval requested"
-                        )
-                        incomingMessages.trySend(
-                            HermesWebhookPayload(type = PayloadType.APPROVAL, approval = approval)
-                        )
-                    }
+    suspend fun send(config: ServerConfig, conversation: String, text: String): Result<List<HermesMessage>> =
+        withContext(Dispatchers.IO) {
+            runCatchingIo {
+                val request = buildResponsesRequest(config, conversation, text)
+                client.newCall(request).await().use { response ->
+                    val body = response.body?.string().orEmpty()
+                    if (!response.isSuccessful) throw httpError(response.code, body)
+                    ResponsesParser.parse(body)
                 }
             }
+        }
 
-            Result.success(replyMessage ?: HermesMessage(text = "", sender = Sender.HERMES))
-        } catch (e: Exception) {
-            Result.failure(e)
+    /**
+     * Reachability + auth check: `GET {baseUrl}/v1/models`, which the gateway
+     * serves only with a valid Bearer key. Nothing is added to the conversation.
+     */
+    suspend fun checkHealth(config: ServerConfig): ConnectionStatus = withContext(Dispatchers.IO) {
+        if (config.baseUrl.isBlank()) return@withContext ConnectionStatus.NOT_CONFIGURED
+        try {
+            val request = Request.Builder()
+                .url("${ServerUrl.normalize(config.baseUrl)}/v1/models")
+                .get()
+                .addHeader("Authorization", "Bearer ${config.apiKey}")
+                .build()
+            healthClient.newCall(request).await().use { response ->
+                when {
+                    response.isSuccessful -> ConnectionStatus.CONNECTED
+                    response.code == 401 || response.code == 403 -> ConnectionStatus.KEY_REJECTED
+                    else -> ConnectionStatus.UNREACHABLE
+                }
+            }
+        } catch (e: IOException) {
+            ConnectionStatus.UNREACHABLE
+        } catch (e: IllegalArgumentException) {
+            ConnectionStatus.UNREACHABLE // malformed URL
         }
     }
+
+    private fun httpError(code: Int, body: String): HermesHttpException {
+        val detail = when (code) {
+            401, 403 -> "API key rejected"
+            else -> body.take(160).ifBlank { "no details" }
+        }
+        return HermesHttpException(code, "HTTP $code: $detail")
+    }
+
+    /** Maps the exceptions a call can raise to [Result.failure], with readable messages. */
+    private inline fun <T> runCatchingIo(block: () -> T): Result<T> = try {
+        Result.success(block())
+    } catch (e: UnknownServiceException) {
+        // OkHttp's message when network_security_config blocks plain http://.
+        Result.failure(IOException("Plain http:// to this host is blocked; use https:// (see README)", e))
+    } catch (e: IOException) {
+        Result.failure(e)
+    } catch (e: JsonParseException) {
+        Result.failure(e)
+    } catch (e: IllegalArgumentException) {
+        Result.failure(IOException("Invalid server URL", e))
+    }
+}
+
+/** Enqueues the call and suspends until it completes; cancellation cancels the call. */
+private suspend fun Call.await(): Response = suspendCancellableCoroutine { cont ->
+    cont.invokeOnCancellation { cancel() }
+    enqueue(object : Callback {
+        override fun onFailure(call: Call, e: IOException) {
+            if (cont.isActive) cont.resumeWithException(e)
+        }
+
+        override fun onResponse(call: Call, response: Response) {
+            if (cont.isActive) cont.resume(response) else response.close()
+        }
+    })
 }

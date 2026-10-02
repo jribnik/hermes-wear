@@ -17,15 +17,11 @@ object HermesColors {
     val OnBackground = Color(0xFFE4E4F0)
     val OnSurface = Color(0xFFC8C8DC)
     val OnPrimary = Color(0xFF0D0D0D)
-    val ApprovalGreen = Color(0xFF4CAF50)
-    val DenyRed = Color(0xFFF44336)
+    val Success = Color(0xFF4CAF50)
+    val Warning = Color(0xFFFFC107)
     val UserBubble = Color(0xFF7C83FD)
     val HermesBubble = Color(0xFF2D2D44)
-    val SystemGray = Color(0xFF666680)
-    val RiskLow = Color(0xFF4CAF50)
-    val RiskMedium = Color(0xFFFFC107)
-    val RiskHigh = Color(0xFFFF9800)
-    val RiskCritical = Color(0xFFF44336)
+    val SystemGray = Color(0xFF8A8AA3)
 }
 
 val WearHermesColors = Colors(
